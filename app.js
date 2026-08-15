@@ -30,6 +30,7 @@ var TOLERANCE_MAX = 0.4;   // OKLab distance the tolerance slider maps onto at 1
 var LS_PALETTES = 'pm.palettes.v1';
 var LS_SETTINGS = 'pm.settings.v1';
 var LS_CURRENT  = 'pm.current.v1';
+var LS_PRESETS  = 'pm.presets.v1';
 
 var state = {
   img: null,             // HTMLImageElement of the source
@@ -43,6 +44,8 @@ var state = {
   activeId: null,        // id of the saved palette this was loaded from
   selected: -1,          // index of the swatch open in the editor
   library: [],
+  presets: [],           // saved whole-page settings
+  activePresetId: null,
   view: 'split',         // split | before | after
   split: 50,             // percent
   zoom: 'fit',           // 'fit' or a number
@@ -1545,6 +1548,208 @@ function doExtract(append) {
 }
 
 /* ---------------------------------------------------------------------------
+   9b. PRESETS — the whole page's processing settings, saved under a name
+   ---------------------------------------------------------------------------
+   Deliberately NOT included: theme, view mode, split position, zoom and the
+   live-preview toggle. Those describe how you are looking at the work, not how
+   the image is processed — having a preset repaint the whole app or throw away
+   your zoom would be a surprise, not a feature.
+   ------------------------------------------------------------------------ */
+
+var PRESET_CONTROLS = [
+  'pm-metric', 'pm-dither', 'pm-dither-amt', 'pm-pixel', 'pm-smooth', 'pm-alpha-cut',
+  'pm-brightness', 'pm-contrast', 'pm-saturation', 'pm-gamma',
+  'pm-denoise', 'pm-speck', 'pm-tolerance', 'pm-smooth-stipple',
+  'pm-merge-colors', 'pm-outline', 'pm-outline-color', 'pm-outline-width',
+  'pm-export-scale', 'pm-export-full'
+];
+
+/* Built-ins store only what they change and are layered over the factory
+   defaults, so adding a control later cannot leave them holding a stale value
+   for a setting they never had an opinion about. */
+var BUILTIN_PRESETS = [
+  { id: 'b-cel', name: 'Clean cel art', settings: {
+      'pm-metric': 'oklab', 'pm-dither': 'none', 'pm-denoise': '1',
+      'pm-speck': '12', 'pm-tolerance': '60', 'pm-smooth-stipple': true } },
+  { id: 'b-flat', name: 'Flat poster', settings: {
+      'pm-dither': 'none', 'pm-merge-colors': '30', 'pm-speck': '24',
+      'pm-tolerance': '70', 'pm-denoise': '1' } },
+  { id: 'b-ink', name: 'Ink lines', settings: {
+      'pm-dither': 'none', 'pm-merge-colors': '25', 'pm-speck': '16',
+      'pm-tolerance': '65', 'pm-outline': true, 'pm-outline-width': '2' } },
+  { id: 'b-pixel', name: 'Pixel art 8×', settings: {
+      'pm-pixel': '8', 'pm-dither': 'none', 'pm-smooth': true,
+      'pm-speck': '2', 'pm-tolerance': '50', 'pm-export-scale': '8' } },
+  { id: 'b-photo', name: 'Photo dither', settings: {
+      'pm-dither': 'fs', 'pm-dither-amt': '100', 'pm-pixel': '1',
+      'pm-denoise': '0', 'pm-speck': '0' } }
+];
+
+var DEFAULT_SETTINGS = null;   // captured at init, before stored settings load
+
+function captureSettings() {
+  var o = {};
+  PRESET_CONTROLS.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    o[id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  return o;
+}
+
+function applySettings(s) {
+  PRESET_CONTROLS.forEach(function (id) {
+    if (!(id in s)) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!s[id];
+    else el.value = s[id];
+  });
+  syncSliderLabels();
+  updateFooter();
+  saveSettings();
+  scheduleRender(0);
+}
+
+function sameSettings(a, b) {
+  if (!a || !b) return false;
+  for (var i = 0; i < PRESET_CONTROLS.length; i++) {
+    var k = PRESET_CONTROLS[i];
+    /* While the outline colour is still tracking the palette's darkest entry
+       it is derived, not chosen — comparing it would report every palette as a
+       modification and the note would never read "Defaults". */
+    if (k === 'pm-outline-color' && !state.outlineColorTouched) continue;
+    if (String(a[k]) !== String(b[k])) return false;
+  }
+  return true;
+}
+
+function allPresets() { return BUILTIN_PRESETS.concat(state.presets); }
+
+function renderPresetList() {
+  var sel = els.setup;
+  sel.innerHTML = '';
+  var blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'Load a preset…';
+  sel.appendChild(blank);
+
+  var mk = function (label, list) {
+    if (!list.length) return;
+    var group = document.createElement('optgroup');
+    group.label = label;
+    list.forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.name + (p.palette ? ' ◦' : '');
+      group.appendChild(o);
+    });
+    sel.appendChild(group);
+  };
+  mk('Built in', BUILTIN_PRESETS);
+  mk('Saved', state.presets);
+  sel.value = state.activePresetId || '';
+}
+
+/* The header note answers "is what I am looking at still the preset I loaded?" */
+function updatePresetNote() {
+  if (!els.setupNote) return;
+  var current = captureSettings();
+  var active = state.activePresetId
+    ? allPresets().filter(function (p) { return p.id === state.activePresetId; })[0]
+    : null;
+
+  if (active) {
+    var full = Object.assign({}, DEFAULT_SETTINGS, active.settings);
+    els.setupNote.textContent = active.name + (sameSettings(current, full) ? '' : ' · modified');
+  } else if (DEFAULT_SETTINGS && sameSettings(current, DEFAULT_SETTINGS)) {
+    els.setupNote.textContent = 'Defaults';
+  } else {
+    els.setupNote.textContent = 'Custom';
+  }
+}
+
+function applyPreset(id) {
+  var p = allPresets().filter(function (x) { return x.id === id; })[0];
+  if (!p) return;
+  applySettings(Object.assign({}, DEFAULT_SETTINGS, p.settings));
+  /* Restore whether the outline colour was deliberately chosen. Without this a
+     preset that carries its own outline colour would have it overwritten by
+     the palette's darkest entry the moment the preset's palette loads below. */
+  state.outlineColorTouched = !!p.outlineColorTouched;
+  if (p.palette && els.setupPalette.checked && p.palette.colors && p.palette.colors.length) {
+    setPalette(p.palette.colors.slice(), p.palette.name, null);
+  }
+  state.activePresetId = id;
+  els.setupName.value = p.name;
+  renderPresetList();
+  updatePresetNote();
+  saveSettings();
+  toast('Loaded "' + p.name + '"');
+}
+
+function savePreset() {
+  var name = (els.setupName.value || '').trim();
+  if (!name) { toast('Give the preset a name first.', true); return; }
+
+  var existing = state.presets.filter(function (p) {
+    return p.name.toLowerCase() === name.toLowerCase();
+  })[0];
+
+  var payload = {
+    settings: captureSettings(),
+    outlineColorTouched: !!state.outlineColorTouched,
+    palette: els.setupPalette.checked && state.palette.colors.length
+      ? { name: els.palName.value || 'Untitled', colors: state.palette.colors.slice() }
+      : null
+  };
+
+  if (existing) {
+    existing.settings = payload.settings;
+    existing.palette = payload.palette;
+    existing.outlineColorTouched = payload.outlineColorTouched;
+    state.activePresetId = existing.id;
+    toast('Updated "' + name + '"');
+  } else {
+    var preset = { id: 's' + Date.now().toString(36), name: name,
+                   settings: payload.settings, palette: payload.palette,
+                   outlineColorTouched: payload.outlineColorTouched };
+    state.presets.unshift(preset);
+    state.activePresetId = preset.id;
+    toast('Saved "' + name + '"');
+  }
+  lsSet(LS_PRESETS, state.presets);
+  renderPresetList();
+  updatePresetNote();
+  saveSettings();
+}
+
+function deletePreset() {
+  var id = state.activePresetId;
+  if (!id) { toast('No preset selected.', true); return; }
+  if (/^b-/.test(id)) { toast('Built-in presets cannot be deleted.', true); return; }
+  var p = state.presets.filter(function (x) { return x.id === id; })[0];
+  state.presets = state.presets.filter(function (x) { return x.id !== id; });
+  state.activePresetId = null;
+  lsSet(LS_PRESETS, state.presets);
+  els.setupName.value = '';
+  renderPresetList();
+  updatePresetNote();
+  saveSettings();
+  if (p) toast('Deleted "' + p.name + '"');
+}
+
+function resetToDefaults() {
+  applySettings(DEFAULT_SETTINGS);
+  state.activePresetId = null;
+  els.setupName.value = '';
+  renderPresetList();
+  updatePresetNote();
+  saveSettings();
+  setStatus('Settings reset to defaults');
+}
+
+/* ---------------------------------------------------------------------------
    10. PERSISTENCE
    ---------------------------------------------------------------------------
    localStorage can throw (private mode, quota, disabled cookies), so every
@@ -1589,6 +1794,8 @@ function saveSettings() {
     exportFull: els.exportFull.checked,
     live: els.live.checked,
     extractN: els.extractN.value,
+    activePresetId: state.activePresetId,
+    setupPalette: els.setupPalette.checked,
     view: state.view,
     split: state.split
   });
@@ -1621,6 +1828,8 @@ function loadSettings() {
   if (s.exportFull != null) els.exportFull.checked = !!s.exportFull;
   if (s.live != null) els.live.checked = !!s.live;
   if (s.extractN != null) els.extractN.value = s.extractN;
+  if (s.activePresetId) state.activePresetId = s.activePresetId;
+  if (s.setupPalette != null) els.setupPalette.checked = !!s.setupPalette;
   if (s.view) state.view = s.view;
   if (s.split != null) state.split = s.split;
   syncSliderLabels();
@@ -1760,6 +1969,9 @@ function syncSliderLabels() {
      painted band is 2n-1 wide. Report the width actually drawn. */
   els.outlineWidthVal.textContent = (+els.outlineWidth.value * 2 - 1) + ' px';
   updateStageNotes();
+  // Every control change routes through here, so this is where "still the
+  // preset I loaded?" gets re-answered.
+  updatePresetNote();
 }
 
 /* The two new cards summarise themselves in their header, so their state is
@@ -1818,6 +2030,7 @@ function cacheEls() {
     'denoise', 'speck', 'tolerance', 'smoothStipple',
     'mergeColors', 'outline', 'outlineColor', 'outlineWidth',
     'cleanNote', 'segmentNote',
+    'setup', 'setupName', 'setupPalette', 'setupNote',
     'brightness', 'contrast', 'saturation', 'gamma',
     'exportScale', 'exportFull', 'time', 'workDims', 'exportDims',
     'viewport', 'drop', 'splitHandle', 'zoomVal',
@@ -2230,6 +2443,18 @@ function wireControls() {
 
   els.extractN.addEventListener('input', function () { syncSliderLabels(); saveSettings(); });
 
+  els.setup.addEventListener('change', function () {
+    if (els.setup.value) applyPreset(els.setup.value);
+  });
+  $('pm-setup-save').addEventListener('click', savePreset);
+  $('pm-setup-delete').addEventListener('click', deletePreset);
+  $('pm-setup-reset').addEventListener('click', resetToDefaults);
+  els.setupName.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); savePreset(); }
+  });
+  // Re-saving with the palette box toggled changes what a preset carries.
+  els.setupPalette.addEventListener('change', saveSettings);
+
   /* Touching the picker opts out of tracking the palette's darkest entry. */
   els.outlineColor.addEventListener('input', function () {
     state.outlineColorTouched = true;
@@ -2289,9 +2514,13 @@ function wireControls() {
 
 function init() {
   cacheEls();
+  /* Snapshot the markup's own values before anything stored overwrites them —
+     this is what "Defaults" restores to, and what built-in presets layer on. */
+  DEFAULT_SETTINGS = captureSettings();
   loadSettings();
 
   state.library = lsGet(LS_PALETTES) || [];
+  state.presets = lsGet(LS_PRESETS) || [];
   var current = lsGet(LS_CURRENT);
   if (current && current.colors && current.colors.length) {
     state.palette.colors = current.colors.slice(0, MAX_COLORS);
@@ -2309,9 +2538,14 @@ function init() {
   syncOutlineColor();
   renderSwatches();
   renderLibrary();
+  renderPresetList();
   syncSliderLabels();
   updateFooter();
   applyView();
+
+  var activePreset = allPresets().filter(function (p) { return p.id === state.activePresetId; })[0];
+  if (activePreset) els.setupName.value = activePreset.name;
+  updatePresetNote();
 
   wireImageInput();
   wirePaletteUI();
@@ -2332,7 +2566,12 @@ function init() {
     extractPalette: extractPalette,
     labelRegions: labelRegions,
     denoiseBuffer: denoiseBuffer,
-    syncOutlineColor: syncOutlineColor
+    syncOutlineColor: syncOutlineColor,
+    captureSettings: captureSettings,
+    applyPreset: applyPreset,
+    savePreset: savePreset,
+    resetToDefaults: resetToDefaults,
+    BUILTIN_PRESETS: BUILTIN_PRESETS
   };
 }
 

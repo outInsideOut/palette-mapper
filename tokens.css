@@ -123,6 +123,7 @@
   --cc-clean: 40, 92, 88;         /* artifact removal / region absorption*/
   --cc-segment: 74, 60, 140;      /* segmentation and boundary outlines  */
   --cc-export: 153, 30, 42;       /* download / clipboard                */
+  --cc-preset: 96, 58, 30;        /* saved whole-page settings           */
 
   /* Companion to the tones above. Category colours are deliberately the same
      in every theme, so text sitting ON one of them cannot come from a theme

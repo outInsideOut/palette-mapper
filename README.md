@@ -71,6 +71,25 @@ attack it from both ends, and **both are off by default**:
 - **Smooth stipple** — one pass of a majority filter. Antialiased edges produce long connected
   1px chains that no size threshold can catch; this is what thins those.
 
+**Presets** — the card at the top of the right rail saves every processing control on the page
+under a name: metric, dither, pixelate, adjustments, alpha cutoff, cleanup, segmentation,
+outlines and export scale. Tick *Include palette* and the palette travels with it, so a preset
+can carry a whole look.
+
+Five built-ins to start from — *Clean cel art*, *Flat poster*, *Ink lines*, *Pixel art 8×*,
+*Photo dither*. They store only the settings they actually change and are layered over the
+defaults, so they never carry a stale value for a control they have no opinion about. Built-ins
+carry no palette and leave yours alone; they can't be deleted.
+
+The card header tells you where you stand: `Defaults`, `Custom`, the preset's name, or
+`Ink lines · modified` once you nudge something. *Defaults* puts every control back to
+factory settings. Saved presets persist in the browser, and a preset whose name matches an
+existing one updates it rather than making a duplicate.
+
+Deliberately *not* saved in a preset: theme, view mode, split position, zoom, and the
+live-preview toggle. Those are how you're looking at the work, not how the image is processed —
+a preset that repainted the app or threw away your zoom would be a surprise, not a feature.
+
 **Segment and outline**:
 
 - **Merge similar** — clusters palette entries that sit within a distance of each other and
@@ -175,4 +194,5 @@ every speck size, because the tolerance gate protects it.
 
 Also on the object: `loadImageFromUrl`, `setPalette`, `renderPreview`, `renderFull`,
 `buildExportCanvas`, `readOptions`, `parsePaletteText`, `buildMatcher`, `extractPalette`,
-`denoiseBuffer`, `syncOutlineColor`.
+`denoiseBuffer`, `syncOutlineColor`, `captureSettings`, `applyPreset`, `savePreset`,
+`resetToDefaults`, `BUILTIN_PRESETS`.

@@ -611,9 +611,9 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
       <div class="pm-section-body">
         <div class="pm-lib cc-scroll" id="pm-lib" role="list" aria-label="Saved palettes"></div>
 
-        <label class="cc-label" for="pm-preset">Presets</label>
+        <label class="cc-label" for="pm-preset">Palette presets</label>
         <select class="pm-select" id="pm-preset">
-          <option value="">Load a preset…</option>
+          <option value="">Load a palette…</option>
         </select>
 
         <label class="cc-label" for="pm-import-text">Paste hex codes</label>
@@ -674,6 +674,31 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
 
   <!-- ===================== RIGHT RAIL — PROCESSING ===================== -->
   <aside class="pm-rail pm-rail--right cc-scroll" aria-label="Processing controls">
+
+    <!-- Ids here are pm-setup-* rather than pm-preset-*: the left rail already
+         owns #pm-preset for the palette preset picker, and two things called
+         "preset" sharing an id prefix is how a wiring bug gets written. -->
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-preset)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Presets</span>
+        <span class="pm-section-note" id="pm-setup-note">Defaults</span>
+      </div>
+      <div class="pm-section-body">
+        <label class="cc-visually-hidden" for="pm-setup">Load a preset</label>
+        <select class="pm-select" id="pm-setup">
+          <option value="">Load a preset…</option>
+        </select>
+        <div class="pm-row">
+          <input type="text" class="pm-text pm-grow" id="pm-setup-name" placeholder="Name this preset" maxlength="40" aria-label="Preset name">
+          <button type="button" class="cc-btn cc-clip-sm" id="pm-setup-save">Save</button>
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-setup-palette" checked> Include palette</label>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-delete">Delete</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-reset">Defaults</button>
+        </div>
+      </div>
+    </section>
 
     <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-map)">
       <div class="cc-card-header">
