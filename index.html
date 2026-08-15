@@ -37,6 +37,11 @@ body.cc-app {
   overflow: hidden;
   /* Clear the fixed 13px footer strip. */
   padding-bottom: var(--cc-h-footer-strip);
+  /* dvh tracks the viewport as a mobile browser's URL bar collapses and
+     re-expands; % and vh do not, which leaves the app either short of the
+     bottom of the screen or running underneath the browser chrome. The height
+     above stays as the fallback for anything without dvh. */
+  height: 100dvh;
 }
 
 /* --- Top chrome ---------------------------------------------------------- */
@@ -139,6 +144,9 @@ body.cc-app {
 [data-cc-theme="gms"] .cc-toolbar,
 [data-cc-theme="ipsn"] .cc-toolbar,
 [data-cc-theme="galsim"] .cc-toolbar,
+[data-cc-theme="gms"] .cc-bottom-nav,
+[data-cc-theme="ipsn"] .cc-bottom-nav,
+[data-cc-theme="galsim"] .cc-bottom-nav,
 [data-cc-theme="gms"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
 [data-cc-theme="ipsn"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
 [data-cc-theme="galsim"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
@@ -506,21 +514,150 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
 .pm-footer { display: flex; gap: var(--cc-space-4); }
 .pm-footer > span { flex: 0 0 auto; }
 
+/* --- Bottom nav (mobile only) -------------------------------------------
+   The one sanctioned rounded element in the system, because it floats free of
+   the layout. It sits above the footer strip rather than covering it. */
+.pm-bottom-nav {
+  display: none;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 6px + var(--cc-h-footer-strip));
+  gap: var(--cc-space-1);
+  padding: 0 var(--cc-space-1);
+}
+.pm-nav-btn {
+  flex: 1 1 0;
+  /* Stretch to the nav's own height so the tap target is the full pill, which
+     is 48px once --cc-h-btn-lg picks up the coarse-pointer value. */
+  align-self: stretch;
+  margin: 4px 0;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: inherit;          /* stark, from .cc-bottom-nav — see the theme fixes */
+  font-family: var(--cc-font-body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: background var(--cc-dur-micro) var(--cc-ease);
+}
+/* The system's tab convention is to fill the selected item with accent, but
+   accent is chosen to be seen, not to be read on — text sits between 1.8:1 and
+   4.6:1 on it depending on theme. The selected item instead cuts through to the
+   app's own ground, which pairs with the body text token at 5.2:1 or better in
+   every theme, and keeps the accent as a ring so the state still reads. */
+.pm-nav-btn[aria-pressed="true"] {
+  background: rgb(var(--cc-background));
+  color: rgb(var(--cc-text));
+  box-shadow: inset 0 0 0 2px rgb(var(--cc-accent));
+}
+.pm-nav-btn:focus-visible { outline: 2px solid rgb(var(--cc-stark)); outline-offset: -2px; }
+
+/* Tap-anywhere-else to dismiss an open sheet. */
+.pm-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  background: rgba(0, 0, 0, 0.45);
+}
+
 /* --- Responsive ---------------------------------------------------------- */
 @media (max-width: 1100px) {
   .pm-frame { grid-template-columns: 260px minmax(0, 1fr) 260px; }
 }
+
+/* Below this the three columns cannot coexist. Rather than stacking them into
+   one very long scroll — which buries the image under two rails of controls —
+   the stage keeps the whole screen and the rails become sheets that slide up
+   over it, one at a time, from the bottom nav. The sheet stops well short of
+   full height on purpose: you need to see the image change while dragging a
+   slider, which is the entire point of a live preview. */
 @media (max-width: 900px) {
-  body.cc-app { overflow: auto; }
+  body.cc-app { overflow: hidden; }
   .pm-frame { grid-template-columns: minmax(0, 1fr); }
-  .pm-rail { max-height: none; overflow: visible; }
-  .pm-rail--left  { border-right: 0; border-bottom: var(--cc-border-w) solid var(--cc-hairline); }
-  .pm-rail--right { border-left: 0;  border-top:    var(--cc-border-w) solid var(--cc-hairline); }
-  .pm-stage { order: -1; min-height: 60vh; }
+  .pm-stage { min-height: 0; }
+
+  .pm-rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1002;
+    height: 62vh;
+    height: 62dvh;
+    border: 0;
+    border-top: var(--cc-field-border-w) solid rgb(var(--cc-accent));
+    box-shadow: var(--cc-shadow-nav);
+    transform: translateY(102%);
+    transition: transform var(--cc-dur-panel) var(--cc-ease);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+  }
+  body[data-panel="palette"] .pm-rail--left,
+  body[data-panel="process"] .pm-rail--right { transform: translateY(0); }
+  body[data-panel="palette"] .pm-scrim,
+  body[data-panel="process"] .pm-scrim { display: block; }
+
+  .pm-bottom-nav { display: flex; }
+
+  .pm-toolbar .pm-wordmark { font-size: 11px; }
+  /* The stage bar has eight controls and no room for section labels too —
+     the buttons say what they do. */
+  .pm-stage-bar .cc-label { display: none; }
+}
+
+/* Touch input, at any width. Keyed on pointer type rather than viewport size
+   because that is the thing that actually decides whether a 24px button can be
+   hit — a desktop window dragged narrow should keep the dense instrument look,
+   and a touch laptop should not. Type sizes and tracking are untouched; only
+   the hit areas grow. */
+@media (pointer: coarse) {
+  :root {
+    --cc-h-btn: 40px;
+    --cc-h-btn-lg: 48px;
+    --cc-h-input: 48px;
+    --cc-h-chip: 28px;
+    --cc-h-list-item: 52px;
+    --cc-h-table-row: 48px;
+  }
+  .pm-toolbar { min-height: 44px; padding: var(--cc-space-1) var(--cc-space-2); }
+  .pm-toolbar .cc-btn { min-height: 40px; }
+  .pm-toolbar select { height: 40px; font-size: 12px; }
+  .pm-stage-bar .cc-btn { min-height: 40px; min-width: 40px; padding: 0 var(--cc-space-3); }
+  .pm-lib-item { min-height: 52px; }
+  .pm-lib-del { width: 40px; height: 40px; font-size: 18px; }
+  .pm-swatch { min-height: 44px; }
+  .pm-swatches { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); }
+  .pm-check { min-height: 40px; }
+  .pm-check input { width: 20px; height: 20px; }
+  .pm-section-body { gap: var(--cc-space-3); }
+
+  /* A 14px-tall track with an 8px thumb is not a touch control. */
+  .pm-range { height: 44px; }
+  .pm-range::-webkit-slider-runnable-track { height: 6px; }
+  .pm-range::-moz-range-track { height: 6px; }
+  .pm-range::-webkit-slider-thumb { width: 16px; height: 30px; margin-top: -12px; }
+  .pm-range::-moz-range-thumb { width: 16px; height: 30px; }
+
+  /* The compare divider is a 2px line — give it a real grab area without
+     making the line itself any fatter. */
+  .pm-split-handle { width: 44px; margin-left: -22px; background: transparent; }
+  .pm-split-handle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+    background: rgb(var(--cc-accent));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pm-progress > i { transition: none; }
+  .pm-rail { transition: none; }
 }
 </style>
 </head>
@@ -570,7 +707,14 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
           <div class="pm-row">
             <input type="color" id="pm-editor-color" aria-label="Swatch colour">
             <input type="text" class="pm-text pm-text--mono pm-grow" id="pm-editor-hex" maxlength="7" spellcheck="false" aria-label="Swatch hex value">
-            <button type="button" class="cc-btn cc-clip-sm" id="pm-editor-del" title="Remove this swatch">Del</button>
+          </div>
+          <!-- Reordering by these rather than only by dragging: HTML5 drag
+               events never fire on touch, so on a phone the swatch order would
+               otherwise be unchangeable. They are also the keyboard path. -->
+          <div class="pm-btn-row">
+            <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-editor-left" title="Move swatch earlier" aria-label="Move swatch earlier">◀ Move</button>
+            <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-editor-right" title="Move swatch later" aria-label="Move swatch later">Move ▶</button>
+            <button type="button" class="cc-btn cc-clip-sm" id="pm-editor-del" title="Remove this swatch">Delete</button>
           </div>
         </div>
 
@@ -652,12 +796,13 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
 
     <div class="pm-viewport cc-scroll" id="pm-viewport">
       <div class="pm-drop" id="pm-drop">
-        <h2 class="cc-heading h2">Paste an image</h2>
+        <h2 class="cc-heading h2">Add an image</h2>
         <p class="cc-effect-text">
           Press <kbd>Ctrl</kbd>+<kbd>V</kbd>, drop a file anywhere on this page,
-          or use <em>Open Image</em>. Nothing is uploaded — all processing happens
+          or use the button below. Nothing is uploaded — all processing happens
           in this browser.
         </p>
+        <button type="button" class="cc-btn cc-btn--lg cc-clip-btn" id="pm-drop-open">Choose an image</button>
       </div>
 
       <div class="pm-canvas-stack" id="pm-canvas-stack" hidden>
@@ -872,6 +1017,14 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
     </section>
   </aside>
 </div>
+
+<div class="pm-scrim" id="pm-scrim"></div>
+
+<nav class="cc-bottom-nav pm-bottom-nav" id="pm-bottom-nav" aria-label="Panels">
+  <button type="button" class="pm-nav-btn" id="pm-nav-image" aria-pressed="true">Image</button>
+  <button type="button" class="pm-nav-btn" id="pm-nav-palette" aria-pressed="false">Palette</button>
+  <button type="button" class="pm-nav-btn" id="pm-nav-process" aria-pressed="false">Process</button>
+</nav>
 
 <div class="pm-toast" id="pm-toast" role="status" aria-live="polite" hidden></div>
 

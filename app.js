@@ -52,6 +52,7 @@ var state = {
   dispW: 0,
   dispH: 0,
   eyedropper: false,
+  panel: 'none',                // mobile sheet: none | palette | process
   outlineColorTouched: false,   // once true, the picker stops tracking the palette
   renderToken: 0,
   lastWork: null,        // { w, h } of the most recent processed buffer
@@ -1997,6 +1998,53 @@ function updateStageNotes() {
   els.segmentNote.textContent = seg.length ? seg.join(' · ') : 'Off';
 }
 
+/* --- Mobile panels -------------------------------------------------------
+   Below the breakpoint the rails are sheets that slide over the stage, driven
+   by the bottom nav. `data-panel` on <body> is the single source of truth; the
+   CSS does the rest. */
+function setPanel(which) {
+  state.panel = which;
+  if (which === 'none') document.body.removeAttribute('data-panel');
+  else document.body.setAttribute('data-panel', which);
+  press(els.navImage, which === 'none');
+  press(els.navPalette, which === 'palette');
+  press(els.navProcess, which === 'process');
+  /* A sheet that has slid off-screen is still in the DOM, so without `inert`
+     its buttons stay in the tab order — and aria-hidden over focusable content
+     is exactly the combination that strands a keyboard user on a control they
+     cannot see. `inert` takes care of both. */
+  setHidden(els.railLeft, which !== 'palette');
+  setHidden(els.railRight, which !== 'process');
+}
+
+function setHidden(el, hidden) {
+  if (hidden) {
+    el.setAttribute('aria-hidden', 'true');
+    el.setAttribute('inert', '');
+  } else {
+    el.removeAttribute('aria-hidden');
+    el.removeAttribute('inert');
+  }
+}
+
+/* The sheets only exist below the breakpoint. Above it both rails are always
+   on screen, so leaving aria-hidden on them would hide half the app from a
+   screen reader on a desktop resize. */
+function syncPanelForWidth() {
+  var mobile = window.matchMedia('(max-width: 900px)').matches;
+  if (!mobile) {
+    document.body.removeAttribute('data-panel');
+    state.panel = 'none';
+    setHidden(els.railLeft, false);
+    setHidden(els.railRight, false);
+    press(els.navImage, true);
+    press(els.navPalette, false);
+    press(els.navProcess, false);
+  } else {
+    setPanel(state.panel || 'none');
+  }
+}
+
 var ZOOM_STEPS = [0.125, 0.25, 0.5, 0.75, 1, 2, 4, 8, 16];
 
 function stepZoom(dir) {
@@ -2046,6 +2094,14 @@ function cacheEls() {
   els.editorColor = $('pm-editor-color');
   els.editorHex = $('pm-editor-hex');
   els.editorDel = $('pm-editor-del');
+  els.editorLeft = $('pm-editor-left');
+  els.editorRight = $('pm-editor-right');
+  els.navImage = $('pm-nav-image');
+  els.navPalette = $('pm-nav-palette');
+  els.navProcess = $('pm-nav-process');
+  els.scrim = $('pm-scrim');
+  els.railLeft = document.querySelector('.pm-rail--left');
+  els.railRight = document.querySelector('.pm-rail--right');
   els.viewSplit = $('pm-view-split');
   els.viewBefore = $('pm-view-before');
   els.viewAfter = $('pm-view-after');
@@ -2074,6 +2130,8 @@ function cacheEls() {
 
 function wireImageInput() {
   els.open.addEventListener('click', function () { els.file.click(); });
+  /* Ctrl+V does not exist on a phone, so the drop zone needs its own way in. */
+  $('pm-drop-open').addEventListener('click', function () { els.file.click(); });
   els.file.addEventListener('change', function () {
     if (els.file.files && els.file.files[0]) loadImageFromBlob(els.file.files[0], els.file.files[0].name);
     els.file.value = '';
@@ -2234,6 +2292,21 @@ function wirePaletteUI() {
     saveCurrent();
     scheduleRender(0);
   });
+
+  function moveSwatch(delta) {
+    var from = state.selected;
+    if (from < 0) return;
+    var to = from + delta;
+    if (to < 0 || to >= state.palette.colors.length) return;
+    var moved = state.palette.colors.splice(from, 1)[0];
+    state.palette.colors.splice(to, 0, moved);
+    state.selected = to;
+    renderSwatches();
+    saveCurrent();
+    scheduleRender(0);
+  }
+  els.editorLeft.addEventListener('click', function () { moveSwatch(-1); });
+  els.editorRight.addEventListener('click', function () { moveSwatch(1); });
 
   $('pm-save').addEventListener('click', function () {
     if (!state.palette.colors.length) { toast('Nothing to save — the palette is empty.', true); return; }
@@ -2411,7 +2484,23 @@ function wireStage() {
   $('pm-zoom-fit').addEventListener('click', function () { state.zoom = 'fit'; layoutCanvases(); });
   $('pm-zoom-1').addEventListener('click', function () { state.zoom = 1; layoutCanvases(); });
 
-  window.addEventListener('resize', function () { if (state.zoom === 'fit') layoutCanvases(); });
+  window.addEventListener('resize', function () {
+    syncPanelForWidth();
+    if (state.zoom === 'fit') layoutCanvases();
+  });
+
+  els.navImage.addEventListener('click', function () { setPanel('none'); });
+  els.navPalette.addEventListener('click', function () {
+    setPanel(state.panel === 'palette' ? 'none' : 'palette');
+  });
+  els.navProcess.addEventListener('click', function () {
+    setPanel(state.panel === 'process' ? 'none' : 'process');
+  });
+  els.scrim.addEventListener('click', function () { setPanel('none'); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && state.panel !== 'none') setPanel('none');
+  });
 }
 
 function wireControls() {
@@ -2546,6 +2635,7 @@ function init() {
   var activePreset = allPresets().filter(function (p) { return p.id === state.activePresetId; })[0];
   if (activePreset) els.setupName.value = activePreset.name;
   updatePresetNote();
+  syncPanelForWidth();
 
   wireImageInput();
   wirePaletteUI();

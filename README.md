@@ -106,6 +106,29 @@ a preset that repainted the app or threw away your zoom would be a surprise, not
 enlarges with nearest-neighbour so the blocks stay crisp. If the browser refuses a clipboard
 image write (Safari, older Firefox), it falls back to downloading and says so.
 
+## On a phone
+
+Below 900px the three columns can't coexist, so the image keeps the whole screen and the two
+rails become sheets that slide up over it from a bottom nav — **Image · Palette · Process**.
+Tap the same button again, tap outside, or press <kbd>Esc</kbd> to dismiss. The sheet
+deliberately stops at 62% of the screen rather than filling it, because you need to watch the
+image change while dragging a slider — that's the whole point of a live preview.
+
+Touch sizing keys on `pointer: coarse`, not on viewport width. Width is the wrong signal: it
+would inflate a desktop window dragged narrow while leaving a touch laptop with 24px buttons.
+Type sizes and tracking are untouched, so the dense instrument look survives; only hit areas
+grow. Everything interactive clears 40px on touch and the compare divider gets a 44px grab area
+around its 2px line.
+
+Two things exist purely because touch has no equivalent: <kbd>Ctrl</kbd>+<kbd>V</kbd> doesn't
+exist on a phone, so the drop zone has its own **Choose an image** button; and HTML5 drag events
+never fire on touch, so swatches can be reordered with **◀ Move / Move ▶** in the editor as well
+as by dragging. Both are also the keyboard-accessible paths.
+
+Heights use `dvh` so the layout tracks a mobile browser's URL bar as it collapses — with plain
+`vh` or `%` the app ends up either short of the bottom of the screen or running underneath the
+browser chrome.
+
 ## Notes on the implementation
 
 **The one thing that can add a colour.** Outlines take a free colour picker, so enabling them
