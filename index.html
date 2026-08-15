@@ -691,7 +691,36 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
 <div class="pm-frame">
 
   <!-- ===================== LEFT RAIL — PALETTE ===================== -->
-  <aside class="pm-rail pm-rail--left cc-scroll" aria-label="Palette library">
+  <!-- Left rail brackets the work: load a whole setup at the top, get the
+       result out at the bottom, palette in between. The right rail is the
+       processing chain on its own — which also keeps the two sides from being
+       three cards against eight. -->
+  <aside class="pm-rail pm-rail--left cc-scroll" aria-label="Presets, palette and export">
+
+    <!-- Ids here are pm-setup-* rather than pm-preset-*: #pm-preset is already
+         the palette preset picker further down this same rail, and two things
+         called "preset" sharing an id prefix is how a wiring bug gets written. -->
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-preset)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Presets</span>
+        <span class="pm-section-note" id="pm-setup-note">Defaults</span>
+      </div>
+      <div class="pm-section-body">
+        <label class="cc-visually-hidden" for="pm-setup">Load a preset</label>
+        <select class="pm-select" id="pm-setup">
+          <option value="">Load a preset…</option>
+        </select>
+        <div class="pm-row">
+          <input type="text" class="pm-text pm-grow" id="pm-setup-name" placeholder="Name this preset" maxlength="40" aria-label="Preset name">
+          <button type="button" class="cc-btn cc-clip-sm" id="pm-setup-save">Save</button>
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-setup-palette" checked> Include palette</label>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-delete">Delete</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-reset">Defaults</button>
+        </div>
+      </div>
+    </section>
 
     <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-palette)">
       <div class="cc-card-header">
@@ -775,6 +804,32 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
         </div>
       </div>
     </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-export)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Export</span>
+        <span class="pm-section-note" id="pm-export-dims">—</span>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Upscale</span>
+            <span class="pm-slider-val" id="pm-export-scale-val">1×</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-export-scale" min="1" max="8" step="1" value="1" aria-label="Export upscale factor">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-export-full" checked> Render at full resolution</label>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy">Copy PNG</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-render">Render full</button>
+        </div>
+        <div class="cc-skew-wrap pm-export-wrap">
+          <button type="button" class="cc-skew-btn" id="pm-download">
+            <span class="cc-skew-label">Download</span>
+          </button>
+        </div>
+      </div>
+    </section>
   </aside>
 
   <!-- ===================== CENTRE — STAGE ===================== -->
@@ -819,31 +874,6 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
 
   <!-- ===================== RIGHT RAIL — PROCESSING ===================== -->
   <aside class="pm-rail pm-rail--right cc-scroll" aria-label="Processing controls">
-
-    <!-- Ids here are pm-setup-* rather than pm-preset-*: the left rail already
-         owns #pm-preset for the palette preset picker, and two things called
-         "preset" sharing an id prefix is how a wiring bug gets written. -->
-    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-preset)">
-      <div class="cc-card-header">
-        <span class="pm-section-title">Presets</span>
-        <span class="pm-section-note" id="pm-setup-note">Defaults</span>
-      </div>
-      <div class="pm-section-body">
-        <label class="cc-visually-hidden" for="pm-setup">Load a preset</label>
-        <select class="pm-select" id="pm-setup">
-          <option value="">Load a preset…</option>
-        </select>
-        <div class="pm-row">
-          <input type="text" class="pm-text pm-grow" id="pm-setup-name" placeholder="Name this preset" maxlength="40" aria-label="Preset name">
-          <button type="button" class="cc-btn cc-clip-sm" id="pm-setup-save">Save</button>
-        </div>
-        <label class="pm-check"><input type="checkbox" id="pm-setup-palette" checked> Include palette</label>
-        <div class="pm-btn-row">
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-delete">Delete</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-reset">Defaults</button>
-        </div>
-      </div>
-    </section>
 
     <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-map)">
       <div class="cc-card-header">
@@ -997,31 +1027,6 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
       </div>
     </section>
 
-    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-export)">
-      <div class="cc-card-header">
-        <span class="pm-section-title">Export</span>
-        <span class="pm-section-note" id="pm-export-dims">—</span>
-      </div>
-      <div class="pm-section-body">
-        <div>
-          <div class="pm-slider-head">
-            <span class="cc-label">Upscale</span>
-            <span class="pm-slider-val" id="pm-export-scale-val">1×</span>
-          </div>
-          <input type="range" class="pm-range" id="pm-export-scale" min="1" max="8" step="1" value="1" aria-label="Export upscale factor">
-        </div>
-        <label class="pm-check"><input type="checkbox" id="pm-export-full" checked> Render at full resolution</label>
-        <div class="pm-btn-row">
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy">Copy PNG</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-render">Render full</button>
-        </div>
-        <div class="cc-skew-wrap pm-export-wrap">
-          <button type="button" class="cc-skew-btn" id="pm-download">
-            <span class="cc-skew-label">Download</span>
-          </button>
-        </div>
-      </div>
-    </section>
   </aside>
 </div>
 
