@@ -98,6 +98,12 @@ a preset that repainted the app or threw away your zoom would be a surprise, not
 - **Outline** — draws lines along the boundaries between regions, in a colour of your choosing,
   1 to 7 px wide. Boundaries against transparency are outlined too, but paint only ever lands
   on the opaque side, so a cut-out gets a clean edge rather than a halo.
+- **Min region** — how big a region has to be to get outlined at all. A boundary is drawn only
+  where the *smaller* of its two regions clears this, so specks and slivers produce no outline.
+  This is the control for outlines that look doubled: a one-pixel-wide region between two others
+  contributes two boundaries a pixel apart, and the region vanishes under them. Raise the
+  threshold past the sliver's area and both boundaries drop out, leaving the region visible as a
+  clean line instead.
 
 **Compare** — the stage shows original and mapped side by side; drag the divider, or press
 <kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> for before, split, and after.
@@ -137,6 +143,19 @@ the output. Until you touch the picker it tracks your palette's darkest entry, s
 case stays clean; when the chosen colour is off-palette the Segment card's header says
 `+1 off-palette`. Everything else — every mapping, dither, cleanup, merge and segmentation
 setting — is incapable of producing a colour that is not a palette entry.
+
+**Outlines are stroked once, by construction.** The edge scan looks only right and down, so every
+boundary segment is visited exactly once and marks exactly one pixel — a boundary can never be
+stroked from both sides. A 100px boundary between two regions paints exactly 100 pixels at width
+1, not 200. What that does *not* prevent is two *different* boundaries lying a pixel apart, which
+is what a thin region between two others produces; those are two real edges, and **Min region** is
+the control for them.
+
+**Area thresholds are measured at the source's resolution**, not against whichever buffer is being
+processed. The preview is capped at 1200px on the long edge, so on a 2400px source a raw pixel
+count would cover four times the relative area there — the preview would clean up far harder than
+the export and the two would disagree. Thresholds are scaled by the working buffer's share of the
+full one, which is why a planted 16px speck survives or vanishes identically in both.
 
 **One mechanism, three features.** Cleanup, segmentation and outlines are all driven by
 labelling the connected regions of equal palette index. Regions below a size threshold are

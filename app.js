@@ -573,6 +573,7 @@ function readOptions() {
     outline: els.outline.checked,
     outlineColor: els.outlineColor.value,
     outlineWidth: +els.outlineWidth.value,
+    outlineMin: +els.outlineMin.value,
     exportScale: +els.exportScale.value,
     exportFull: els.exportFull.checked,
     live: els.live.checked
@@ -1073,24 +1074,51 @@ function absorbSmallRegions(indices, labels, regions, w, h, maxArea, tolerance, 
 /* Paint region boundaries. Edges are found on the final label map, so they
    follow the cleaned-up, merged regions rather than raw mapping noise.
 
-   Boundaries against transparency count, but paint only ever lands on the
-   opaque side — a cut-out gets a clean edge instead of a halo. */
-function drawOutlines(imageData, labels, w, h, colorHex, width) {
+   TWO INVARIANTS, both load-bearing:
+
+   1. Every boundary segment paints exactly ONE pixel. The scan looks only
+      right and down, so each segment is visited once and once only, and each
+      visit marks a single pixel. A boundary can therefore never be stroked
+      twice — once from each side — however the regions are shaped.
+
+      Note what this does *not* claim: two different boundaries lying one pixel
+      apart still paint two adjacent pixels, because they are two real edges.
+      A one-pixel-wide region between two others produces exactly that, and it
+      is what reads as a "doubled" outline. `minArea` is the control for it —
+      the sliver stops qualifying and neither of its boundaries is drawn.
+
+   2. Paint never lands on a transparent pixel. Where a region meets
+      transparency the mark goes to whichever side is opaque, so a cut-out gets
+      a clean edge rather than a halo hanging in the empty space.
+
+   A boundary qualifies when the SMALLER of its two regions meets `minArea`;
+   transparency counts as qualifying, so a big region keeps its silhouette. */
+function drawOutlines(imageData, labels, w, h, colorHex, width, areas, minArea) {
   var rgb = hexToRgb(colorHex) || [0, 0, 0];
   var edge = new Uint8Array(w * h);
   var x, y, i;
 
+  // Transparent (-1) qualifies; a real region has to earn it on area.
+  function qualifies(label) {
+    return label < 0 || !minArea || areas[label] >= minArea;
+  }
+
+  /* Mark one side of the boundary between `a` and `b`. Prefers the opaque
+     pixel; with both opaque it takes `a`, the up/left one, so the choice is
+     deterministic and the stroke lands consistently. */
+  function mark(a, b) {
+    var la = labels[a], lb = labels[b];
+    if (la === lb) return;
+    if (la < 0 && lb < 0) return;                 // empty space either side
+    if (!qualifies(la) || !qualifies(lb)) return;
+    edge[la < 0 ? b : a] = 1;
+  }
+
   for (y = 0; y < h; y++) {
     for (x = 0; x < w; x++) {
       i = y * w + x;
-      if (labels[i] < 0) continue;                  // never paint transparent pixels
-      if ((x < w - 1 && labels[i + 1] !== labels[i]) ||
-          (y < h - 1 && labels[i + w] !== labels[i])) {
-        edge[i] = 1;
-      } else if ((x > 0 && labels[i - 1] < 0) || (y > 0 && labels[i - w] < 0) ||
-                 (x < w - 1 && labels[i + 1] < 0) || (y < h - 1 && labels[i + w] < 0)) {
-        edge[i] = 1;                                // border with transparency
-      }
+      if (x < w - 1) mark(i, i + 1);
+      if (y < h - 1) mark(i, i + w);
     }
   }
 
@@ -1125,13 +1153,24 @@ function writeIndices(imageData, indices, matcher) {
   }
 }
 
-/* Runs everything after mapping. Returns the ImageData, or null if superseded. */
-async function postProcess(imageData, indices, matcher, opts, token, onProgress) {
+/* Runs everything after mapping. Returns the ImageData, or null if superseded.
+
+   `areaScale` is the working buffer's share of the full-resolution buffer.
+   Area thresholds are authored against the source's true resolution and scaled
+   through it, because the preview is capped at PREVIEW_MAX and an absolute
+   pixel count would otherwise mean something different in each — a 2x
+   downscale covers 4x the relative area, so the preview cleaned up far harder
+   than the export and the two disagreed. At full resolution this is 1. */
+async function postProcess(imageData, indices, matcher, opts, token, onProgress, areaScale) {
   if (!opts.speck && !opts.smoothStipple && !opts.mergeColors && !opts.outline) return imageData;
 
   var w = imageData.width, h = imageData.height;
   var dist = buildPaletteDistances(matcher);
   var tolerance = opts.tolerance * TOLERANCE_MAX;
+  var scale = areaScale == null ? 1 : areaScale;
+  var scaleArea = function (v) { return v > 0 ? Math.max(1, Math.round(v * scale)) : 0; };
+  var speckArea = scaleArea(opts.speck);
+  var outlineMinArea = scaleArea(opts.outlineMin);
 
   /* Each stage here is a single synchronous sweep, so yielding between them
      unconditionally would cost a clamped macrotask apiece — real money on a
@@ -1160,7 +1199,7 @@ async function postProcess(imageData, indices, matcher, opts, token, onProgress)
     if (!await breathe(0.7)) return null;
 
     if (opts.speck > 0) {
-      absorbSmallRegions(indices, regions.labels, regions, w, h, opts.speck, tolerance, dist);
+      absorbSmallRegions(indices, regions.labels, regions, w, h, speckArea, tolerance, dist);
       if (!await breathe(0.85)) return null;
     }
   }
@@ -1168,7 +1207,8 @@ async function postProcess(imageData, indices, matcher, opts, token, onProgress)
   writeIndices(imageData, indices, matcher);
 
   if (opts.outline && regions) {
-    drawOutlines(imageData, regions.labels, w, h, opts.outlineColor, opts.outlineWidth);
+    drawOutlines(imageData, regions.labels, w, h, opts.outlineColor, opts.outlineWidth,
+                 regions.areas, outlineMinArea);
   }
 
   if (onProgress) onProgress(1);
@@ -1214,7 +1254,13 @@ async function runPipeline(dims, matcher, opts, token) {
     span(opts.denoise > 0 ? 0.35 : 0, postActive(opts) ? 0.8 : 1));
   if (!mapped) return null;
 
-  return await postProcess(mapped.imageData, mapped.indices, matcher, opts, token, span(0.8, 1));
+  /* Area thresholds are authored at the source's resolution; the preview works
+     on a smaller buffer, so they are scaled by its share of the full one. */
+  var full = workDims(opts, true);
+  var areaScale = (dims.w * dims.h) / (full.w * full.h);
+
+  return await postProcess(mapped.imageData, mapped.indices, matcher, opts, token,
+                           span(0.8, 1), areaScale);
 }
 
 var renderTimer = null;
@@ -1561,7 +1607,7 @@ var PRESET_CONTROLS = [
   'pm-metric', 'pm-dither', 'pm-dither-amt', 'pm-pixel', 'pm-smooth', 'pm-alpha-cut',
   'pm-brightness', 'pm-contrast', 'pm-saturation', 'pm-gamma',
   'pm-denoise', 'pm-speck', 'pm-tolerance', 'pm-smooth-stipple',
-  'pm-merge-colors', 'pm-outline', 'pm-outline-color', 'pm-outline-width',
+  'pm-merge-colors', 'pm-outline', 'pm-outline-color', 'pm-outline-width', 'pm-outline-min',
   'pm-export-scale', 'pm-export-full'
 ];
 
@@ -1577,7 +1623,8 @@ var BUILTIN_PRESETS = [
       'pm-tolerance': '70', 'pm-denoise': '1' } },
   { id: 'b-ink', name: 'Ink lines', settings: {
       'pm-dither': 'none', 'pm-merge-colors': '25', 'pm-speck': '16',
-      'pm-tolerance': '65', 'pm-outline': true, 'pm-outline-width': '2' } },
+      'pm-tolerance': '65', 'pm-outline': true, 'pm-outline-width': '2',
+      'pm-outline-min': '24' } },
   { id: 'b-pixel', name: 'Pixel art 8×', settings: {
       'pm-pixel': '8', 'pm-dither': 'none', 'pm-smooth': true,
       'pm-speck': '2', 'pm-tolerance': '50', 'pm-export-scale': '8' } },
@@ -1786,6 +1833,7 @@ function saveSettings() {
     outline: els.outline.checked,
     outlineColor: els.outlineColor.value,
     outlineWidth: els.outlineWidth.value,
+    outlineMin: els.outlineMin.value,
     outlineColorTouched: state.outlineColorTouched,
     brightness: els.brightness.value,
     contrast: els.contrast.value,
@@ -1820,6 +1868,7 @@ function loadSettings() {
   if (s.outline != null) els.outline.checked = !!s.outline;
   if (s.outlineColor) els.outlineColor.value = s.outlineColor;
   if (s.outlineWidth != null) els.outlineWidth.value = s.outlineWidth;
+  if (s.outlineMin != null) els.outlineMin.value = s.outlineMin;
   state.outlineColorTouched = !!s.outlineColorTouched;
   if (s.brightness != null) els.brightness.value = s.brightness;
   if (s.contrast != null) els.contrast.value = s.contrast;
@@ -1969,6 +2018,7 @@ function syncSliderLabels() {
   /* Each step past the first dilates the edge outward on both sides, so the
      painted band is 2n-1 wide. Report the width actually drawn. */
   els.outlineWidthVal.textContent = (+els.outlineWidth.value * 2 - 1) + ' px';
+  els.outlineMinVal.textContent = +els.outlineMin.value ? '≥ ' + els.outlineMin.value + ' px' : 'Off';
   updateStageNotes();
   // Every control change routes through here, so this is where "still the
   // preset I loaded?" gets re-answered.
@@ -1988,6 +2038,7 @@ function updateStageNotes() {
   if (+els.mergeColors.value) seg.push('merge ' + els.mergeColors.value);
   if (els.outline.checked) {
     seg.push('outline ' + (+els.outlineWidth.value * 2 - 1) + 'px');
+    if (+els.outlineMin.value) seg.push('≥' + els.outlineMin.value + 'px');
     /* Outlines take a free colour, so they are the one thing that can put a
        colour in the output that is not in the palette. Say so rather than let
        the tool's central claim quietly stop being true. */
@@ -2076,7 +2127,7 @@ function cacheEls() {
     'preset', 'importText',
     'metric', 'dither', 'ditherAmt', 'pixel', 'smooth', 'live', 'alphaCut',
     'denoise', 'speck', 'tolerance', 'smoothStipple',
-    'mergeColors', 'outline', 'outlineColor', 'outlineWidth',
+    'mergeColors', 'outline', 'outlineColor', 'outlineWidth', 'outlineMin',
     'cleanNote', 'segmentNote',
     'setup', 'setupName', 'setupPalette', 'setupNote',
     'brightness', 'contrast', 'saturation', 'gamma',
@@ -2125,6 +2176,7 @@ function cacheEls() {
   els.toleranceVal = $('pm-tolerance-val');
   els.mergeColorsVal = $('pm-merge-colors-val');
   els.outlineWidthVal = $('pm-outline-width-val');
+  els.outlineMinVal = $('pm-outline-min-val');
   els.palFile = $('pm-pal-file');
 }
 
@@ -2513,7 +2565,7 @@ function wireControls() {
   [els.metric, els.dither, els.pixel, els.smooth, els.alphaCut,
    els.brightness, els.contrast, els.saturation, els.gamma, els.ditherAmt,
    els.denoise, els.speck, els.tolerance, els.smoothStipple,
-   els.mergeColors, els.outline, els.outlineWidth].forEach(function (el) {
+   els.mergeColors, els.outline, els.outlineWidth, els.outlineMin].forEach(function (el) {
     el.addEventListener('input', function () {
       syncSliderLabels();
       updateFooter();
