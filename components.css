@@ -1,0 +1,729 @@
+﻿/* ============================================================================
+   COMP/CON UI — COMPONENT LAYER
+   ----------------------------------------------------------------------------
+   Requires tokens.css. Framework-agnostic: plain classes, no JS, no build step.
+   Every rule resolves color through a token — never hardcode.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   0. FOUNDATION
+   ---------------------------------------------------------------------------
+   RULE ZERO: nothing is rounded. Corners are cut, not curved. The only
+   sanctioned exception is the floating bottom nav pill.
+   ------------------------------------------------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+body.cc-app {
+  margin: 0;
+  background: rgb(var(--cc-background));
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------------------
+   1. TYPOGRAPHY
+   ---------------------------------------------------------------------------
+   Headings are authored in POINTS, not pixels — an intentional quirk of the
+   original that produces its particular scale. Keep pt if you want an exact
+   match; the px equivalents are noted for reference (1pt = 1.333px).
+
+   Headings are ALWAYS uppercase, weight 900, tracked 2px. If you substitute
+   the typeface, keep the transform and tracking — they carry the identity.
+   ------------------------------------------------------------------------ */
+.cc-heading {
+  font-family: var(--cc-font-heading);
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-heading);
+  margin: 0;
+}
+
+.cc-heading.h1      { font-size: 36pt; }  /* ~48px */
+.cc-heading.h2      { font-size: 18pt; }  /* ~24px */
+.cc-heading.h3      { font-size: 14pt; }  /* ~18.7px */
+.cc-heading.h4      { font-size: 12pt; }  /* ~16px */
+
+/* Display variants */
+.cc-heading.display {                     /* hero title */
+  font-family: var(--cc-font-display);
+  font-size: 50pt;
+  line-height: 35pt;                      /* tight leading vs wide tracking */
+  letter-spacing: var(--cc-track-display);
+  color: rgb(var(--cc-stark));
+}
+.cc-heading.table   { font-family: var(--cc-font-display); font-size: 24pt; }
+.cc-heading.feature { font-size: 36pt; color: rgb(var(--cc-accent)); }
+.cc-heading.sub     { font-size: 16pt; color: rgb(var(--cc-accent)); }
+
+/* Responsive step-down — measured from the original at the md breakpoint. */
+@media (max-width: 1280px) {
+  .cc-heading.h1      { font-size: 31pt; }
+  .cc-heading.h3      { font-size: 13pt; }
+  .cc-heading.table   { font-size: 22pt; }
+  .cc-heading.feature { font-size: 32pt; }
+  .cc-heading.sub     { font-size: 14pt; }
+}
+
+/* --- The text triad ------------------------------------------------------
+   Three body styles, three distinct jobs. Never mix them arbitrarily —
+   this separation is a core part of the language. */
+
+/* In-world prose, quotes, lore, descriptions. Recedes. */
+.cc-flavor-text {
+  font-family: var(--cc-font-mono);
+  font-size: 12pt;
+  color: rgb(var(--cc-light-text));
+}
+
+/* Rules text, effects, functional body copy. The workhorse. */
+.cc-effect-text {
+  font-family: var(--cc-font-heading);
+  font-size: 12pt;
+  color: rgb(var(--cc-text));
+}
+
+/* Numbers, stats, readouts. Maximum contrast, monospaced for alignment. */
+.cc-stat-text {
+  font-family: var(--cc-font-mono);
+  font-size: 12pt;
+  font-weight: bolder;
+  color: rgb(var(--cc-stark));
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- UI labels ------------------------------------------------------------
+   Small, uppercase, widely tracked. This is what makes controls read as
+   instrumentation rather than as a generic web app. */
+.cc-label {
+  font-family: var(--cc-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-heading);
+  color: rgb(var(--cc-subtle));
+}
+.cc-label--wide { letter-spacing: var(--cc-track-wide); }
+
+/* ---------------------------------------------------------------------------
+   2. THE CHAMFER VOCABULARY — the single most identifying element
+   ---------------------------------------------------------------------------
+   Corners are cut with clip-path. Rules of use:
+
+     * Default panel/card       -> bottom-right notch (.cc-clip*)
+     * Attached/secondary       -> top-right notch (.cc-clip-*-invert)
+     * Interactive/button       -> both corners (.cc-clip-btn)
+     * Notch size scales with element size: sm 5 / md 15 / lg 30 / xl 50
+
+   CAVEAT: clip-path removes borders and shadows along the cut edge. To draw a
+   hairline along a chamfer, overlay .cc-clip-fix (below) — this is exactly
+   how the original does it.
+   ------------------------------------------------------------------------ */
+
+/* Bottom-right cut — the default */
+.cc-clip-sm { clip-path: polygon(100% 0, 100% calc(100% - 5px),  calc(100% - 5px) 100%,  0 100%, 0 0); }
+.cc-clip    { clip-path: polygon(100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 0); }
+.cc-clip-lg { clip-path: polygon(100% 0, 100% calc(100% - 30px), calc(100% - 30px) 100%, 0 100%, 0 0); }
+.cc-clip-xl { clip-path: polygon(100% 0, 100% calc(100% - 50px), calc(100% - 50px) 100%, 0 100%, 0 0); }
+
+/* Top-right cut — for elements attached to something above */
+.cc-clip-sm-invert { clip-path: polygon(calc(100% - 5px) 0,  100% calc(100% - 5px),  100% 100%, 0 100%, 0 0); }
+.cc-clip-invert    { clip-path: polygon(calc(100% - 10px) 0, 100% calc(100% - 15px), 100% 100%, 0 100%, 0 0); }
+.cc-clip-lg-invert { clip-path: polygon(calc(100% - 20px) 0, 100% calc(100% - 20px), 100% 100%, 0 100%, 0 0); }
+.cc-clip-square-invert { clip-path: polygon(calc(100% - 30px) 0, 100% 30px, 100% 100%, 0 100%, 0 0); }
+
+/* Top-left cut — the card signature (matches the original's inline style) */
+.cc-clip-card    { clip-path: polygon(20px 0, 100% 0, 100% 100%, 0 100%, 0 20px); }
+.cc-clip-card-sm { clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); }
+
+/* Opposing corners — interactive elements */
+.cc-clip-btn {
+  clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px),
+                     calc(100% - 20px) 100%, 0 100%, 0 20px);
+}
+
+/* Panel-scale cuts */
+.cc-clip-panel { clip-path: polygon(0 0, 100% 0, 100% calc(100% - 24px), calc(100% - 24px) 100%, 0 100%); }
+.cc-clip-slice { clip-path: polygon(0 0, 100% 0, 100% 0, calc(100% - 24px) 100%, 0 100%); }
+
+/* Small angular marker used for status dots / bullets */
+.cc-pip {
+  width: 17px;
+  height: 17px;
+  clip-path: polygon(0 50%, 50% 0, 100% 0, 0 100%);
+  transition: filter var(--cc-dur-micro) ease-in-out;
+  background: rgb(var(--cc-accent));
+  display: inline-block;
+}
+
+/* Hairline drawn along a 24px chamfer. Place inside a position:relative
+   parent that carries .cc-clip-panel.
+   The original hardcodes rgba(126,126,126,.3), which disappears on the light
+   themes — routed through panel-border here so it survives theme switching. */
+.cc-clip-fix {
+  position: absolute;
+  width: 38px;
+  height: 2px;
+  background: rgba(var(--cc-panel-border), 0.6);
+  bottom: 8px;
+  right: -6px;
+  transform: rotate(-45deg);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   3. SURFACES & PANELS
+   ------------------------------------------------------------------------ */
+
+/* The double-rule frame — a distinctive, deliberately "technical" border. */
+.cc-panel-block {
+  background: rgb(var(--cc-panel));
+  border: var(--cc-panel-double-w) double rgb(var(--cc-panel-border));
+  border-radius: 2px;              /* the one tiny radius in the system */
+  padding: var(--cc-space-4);
+}
+
+.cc-surface { background: rgb(var(--cc-surface)); }
+.cc-panel   { background: rgb(var(--cc-panel)); }
+
+/* Cards: flat, square, no shadow. Depth comes from tint, not elevation. */
+.cc-card {
+  background: rgb(var(--cc-surface));
+  border: 0;
+  box-shadow: none;
+  position: relative;
+  overflow: hidden;
+  transition: background var(--cc-dur-card) var(--cc-ease),
+              opacity var(--cc-dur-card) var(--cc-ease);
+}
+
+/* TONAL FILL — the core mechanism for semantic category color.
+   Set --cc-tone to any category token, then the card tints itself and its
+   text automatically:
+
+       <div class="cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-dither)">
+*/
+.cc-tonal {
+  background: rgba(var(--cc-tone, var(--cc-panel)), 0.22);
+  color: rgb(var(--cc-text));
+}
+.cc-tonal-strong { background: rgba(var(--cc-tone, var(--cc-panel)), 0.45); }
+
+/* Colored header band on a card — pairs with .cc-tonal */
+.cc-card-header {
+  background: rgb(var(--cc-tone, var(--cc-primary)));
+  color: rgb(var(--cc-stark));
+  padding: var(--cc-space-1) var(--cc-space-3);
+}
+
+.cc-divider {
+  border: 0;
+  border-top: var(--cc-border-w) solid var(--cc-hairline);
+  margin: 0;
+}
+
+/* Diegetic status strip pinned to the bottom of the viewport. Pure
+   atmosphere — put a build ID, connection state, or timestamp here. */
+.cc-panel-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  height: var(--cc-h-footer-strip);
+  line-height: 15px;
+  font-size: 8px;
+  letter-spacing: var(--cc-track-strip);
+  text-transform: uppercase;
+  opacity: 0.6;
+  background: rgb(var(--cc-background));
+  color: rgb(var(--cc-text));
+  padding: 0 var(--cc-space-2);
+  /* 8px text at 4px tracking gets long fast. Clip it rather than let a status
+     strip widen the document and introduce a horizontal scrollbar on mobile. */
+  max-width: 100vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+   4. NAVIGATION & MENU FOLDING
+   ------------------------------------------------------------------------ */
+
+/* --- 4a. Top chrome ------------------------------------------------------ */
+.cc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  min-height: var(--cc-h-toolbar);
+  padding: 0 var(--cc-space-2);
+  background: rgb(var(--cc-primary));
+  color: rgb(var(--cc-stark));
+  box-shadow: var(--cc-shadow-bar);
+}
+
+/* --- 4b. Side drawer ----------------------------------------------------- */
+.cc-drawer {
+  width: var(--cc-w-drawer);
+  background: rgb(var(--cc-surface));
+  border-right: var(--cc-border-w) solid var(--cc-hairline);
+  overflow-y: auto;
+  transition: transform var(--cc-dur-panel) var(--cc-ease);
+}
+/* Below the breakpoint the drawer overlays instead of pushing content. */
+.cc-drawer--collapsed { transform: translateX(-100%); }
+
+@media (max-width: 1264px) {
+  .cc-drawer {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 1000;
+  }
+}
+
+/* --- 4c. Nested list folding --------------------------------------------
+   Group parents sit at the base indent; children step in by 12px. Depth is
+   communicated by indentation alone — no connector lines, no chevron column. */
+.cc-list { list-style: none; margin: 0; padding: 0; }
+
+.cc-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  min-height: var(--cc-h-list-item);
+  padding: var(--cc-space-1) var(--cc-space-2);
+  color: rgb(var(--cc-text));
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--cc-dur-micro) var(--cc-ease);
+}
+.cc-list-item:hover { background: rgb(var(--cc-surface-hover)); }
+.cc-list-item[aria-current="true"],
+.cc-list-item.is-active {
+  background: rgba(var(--cc-accent), 0.18);
+  color: rgb(var(--cc-stark));
+  box-shadow: inset 3px 0 0 rgb(var(--cc-accent));
+}
+.cc-list-item--child { padding-left: var(--cc-space-5); }
+
+/* Collapsible group: toggle [hidden] on the child <ul> from JS, or drive it
+   with <details>. */
+.cc-list-group[aria-expanded="false"] + .cc-list-children { display: none; }
+
+/* --- 4d. Panel toggle — the signature fold affordance --------------------
+   A grab handle that straddles the edge of a collapsible panel, spanning the
+   middle 40% of its height. Rounded on the OUTER edge only — the one place
+   curvature is allowed, because it reads as a physical pull-tab. */
+.cc-panel-toggle {
+  position: absolute;
+  z-index: 999;
+  top: 30%;
+  bottom: 30%;
+  width: 14px;
+  cursor: pointer;
+  background: rgb(var(--cc-primary));
+  transition: background-color var(--cc-dur-panel);
+  border: 0;
+  padding: 0;
+}
+.cc-panel-toggle:hover,
+.cc-panel-toggle:focus-visible { background: rgb(var(--cc-accent)); }
+
+.cc-panel-toggle.left  { left: 100%; border-top-right-radius: 14px; border-bottom-right-radius: 14px; }
+.cc-panel-toggle.right { right: 100%; border-top-left-radius: 14px;  border-bottom-left-radius: 14px; }
+
+.cc-panel-toggle-chevron {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgb(var(--cc-stark));
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* --- 4e. Floating bottom nav pill ---------------------------------------
+   THE sanctioned exception to rule zero: this one element is rounded and
+   shadowed, because it floats free of the layout. */
+.cc-bottom-nav {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  height: var(--cc-h-btn-lg);
+  z-index: 1004;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: rgb(var(--cc-primary));
+  color: rgb(var(--cc-stark));
+  border-radius: 12px;
+  box-shadow: var(--cc-shadow-nav);
+}
+
+/* --- 4f. Tabs ------------------------------------------------------------
+   Square, uppercase, tracked. Selected tab FILLS with accent — no underline
+   indicator. Tabs sit directly on the primary bar. */
+.cc-tabs {
+  display: flex;
+  background: rgb(var(--cc-primary));
+  padding: 0 var(--cc-space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cc-tabs::-webkit-scrollbar { display: none; }
+
+.cc-tab {
+  flex: 0 0 auto;
+  min-height: var(--cc-h-toolbar);
+  padding: 0 var(--cc-space-4);
+  background: transparent;
+  border: 0;
+  color: rgb(var(--cc-stark));
+  font-family: var(--cc-font-body);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--cc-dur-micro) var(--cc-ease);
+}
+.cc-tab:hover { background: rgba(var(--cc-stark), 0.08); }
+.cc-tab[aria-selected="true"] { background: rgb(var(--cc-accent)); }
+
+/* ---------------------------------------------------------------------------
+   5. BUTTONS
+   ------------------------------------------------------------------------ */
+.cc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cc-space-1);
+  min-height: var(--cc-h-btn);
+  padding: 0 var(--cc-space-3);
+  border: 0;
+  background: rgb(var(--cc-primary));
+  color: rgb(var(--cc-stark));
+  font-family: var(--cc-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color var(--cc-dur-micro) var(--cc-ease);
+}
+.cc-btn:hover  { background: rgb(var(--cc-active)); }
+.cc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cc-btn:focus-visible { outline: 2px solid rgb(var(--cc-accent)); outline-offset: 2px; }
+
+.cc-btn--lg      { min-height: var(--cc-h-btn-lg); font-size: 14px; padding: 0 var(--cc-space-4); }
+.cc-btn--outline { background: transparent; border: var(--cc-field-border-w) solid rgb(var(--cc-accent)); color: rgb(var(--cc-accent)); }
+.cc-btn--outline:hover { background: rgba(var(--cc-accent), 0.12); }
+.cc-btn--text    { background: transparent; color: rgb(var(--cc-text)); }
+.cc-btn--text:hover { background: rgba(var(--cc-stark), 0.08); }
+
+/* --- The skewed hero button — the signature interactive element ----------
+   A parallelogram with a counter-skewed label, trailing detail slivers that
+   slide outward on hover, and an underline that wipes in. Use sparingly:
+   one per screen, for the primary destination.
+
+   Markup:
+     <div class="cc-skew-wrap">
+       <button class="cc-skew-btn"><span class="cc-skew-label">LAUNCH</span></button>
+     </div>
+*/
+.cc-skew-wrap {
+  position: relative;
+  height: 70px;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.cc-skew-btn {
+  position: absolute;
+  left: -30px;
+  height: 70px;
+  width: 620px;
+  /* Leave room for the trailing slivers' 50px of outward travel on hover,
+     so the effect never widens the document on narrow viewports. */
+  max-width: calc(100% - 60px);
+  transform: skew(-0.65rad);
+  background: rgb(var(--cc-primary));
+  border: 0;
+  outline: none;
+  cursor: pointer;
+  z-index: 5;
+  transition: var(--cc-dur-signature) ease-in-out;
+}
+.cc-skew-btn:not(.disabled):hover,
+.cc-skew-btn:not(.disabled):focus-visible { background: rgb(var(--cc-active)); }
+
+/* Two trailing slivers that slide further out on hover */
+.cc-skew-btn::before,
+.cc-skew-btn::after {
+  content: " ";
+  position: absolute;
+  height: 71px;
+  background: rgb(var(--cc-background));
+  transition: var(--cc-dur-signature) ease-in-out;
+  z-index: 4;
+}
+/* Offsets are anchored to the RIGHT edge, not a fixed left position. The
+   original hardcodes left:590px against a 620px button; that detaches and
+   flies off-screen as soon as the button is narrower (mobile, max-width).
+   These right-based values are visually identical at 620px and track the
+   button correctly at any width. */
+.cc-skew-btn::before { right: 22px; width: 8px; }
+.cc-skew-btn::after  { right: 18px; width: 12px; }
+.cc-skew-btn:not(.disabled):hover::before,
+.cc-skew-btn:not(.disabled):focus-visible::before { right: -38px; background: rgb(var(--cc-active)); }
+.cc-skew-btn:not(.disabled):hover::after,
+.cc-skew-btn:not(.disabled):focus-visible::after  { right: -17px; background: rgb(var(--cc-active)); }
+
+/* Counter-skewed label, with a wipe-in underline */
+.cc-skew-label {
+  position: absolute;
+  left: 50px;
+  top: 50%;
+  transform: translateY(-50%) skew(0.65rad);
+  color: rgb(var(--cc-stark));
+  font-family: var(--cc-font-heading);
+  font-size: 28pt;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-heading);
+  white-space: nowrap;
+}
+.cc-skew-label::before {
+  content: "";
+  position: absolute;
+  bottom: 5px;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background: rgb(var(--cc-background));
+  transform: scaleX(0);
+  transform-origin: right bottom;
+  transition: transform var(--cc-dur-signature);
+}
+.cc-skew-btn:hover .cc-skew-label::before,
+.cc-skew-btn:focus-visible .cc-skew-label::before {
+  transform: scaleX(1);
+  transform-origin: left bottom;
+}
+
+/* --- Icon hover glow -----------------------------------------------------
+   Icons idle dim and "power up" on hover. Applied to the parent so a whole
+   cluster lights together. */
+.cc-glow { opacity: 0.7; transition: var(--cc-dur-micro) ease-in-out; }
+.cc-glow--faint { opacity: 0.4; }
+.cc-glow-host:hover .cc-glow,
+.cc-glow-host:focus-within .cc-glow {
+  opacity: 1;
+  filter: brightness(2) saturate(200%) hue-rotate(20deg);
+}
+
+/* ---------------------------------------------------------------------------
+   6. INPUTS
+   ---------------------------------------------------------------------------
+   Square, compact (40px), two variants: solo (filled) and outlined (2px).
+   Labels are small uppercase, tracked, and sit ABOVE the field — no floating
+   label animation.
+   ------------------------------------------------------------------------ */
+.cc-field { display: flex; flex-direction: column; gap: var(--cc-space-1); }
+
+.cc-field-label {
+  font-family: var(--cc-font-body);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-label);
+  color: rgb(var(--cc-subtle));
+}
+
+.cc-input,
+.cc-select,
+.cc-textarea {
+  height: var(--cc-h-input);
+  padding: 0 var(--cc-space-3);
+  background: rgb(var(--cc-surface));
+  border: 0;
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-body);
+  font-size: 14px;
+  letter-spacing: 0.15px;
+  transition: box-shadow var(--cc-dur-micro) var(--cc-ease);
+}
+.cc-textarea { height: auto; min-height: 80px; padding: var(--cc-space-2) var(--cc-space-3); resize: vertical; }
+
+.cc-input:focus,
+.cc-select:focus,
+.cc-textarea:focus {
+  outline: none;
+  box-shadow: inset 0 -2px 0 rgb(var(--cc-accent));
+}
+
+/* Outlined variant — 2px border is deliberate; 1px reads too soft here. */
+.cc-input--outline,
+.cc-select--outline,
+.cc-textarea--outline {
+  background: transparent;
+  border: var(--cc-field-border-w) solid rgb(var(--cc-panel-border));
+}
+.cc-input--outline:focus,
+.cc-select--outline:focus,
+.cc-textarea--outline:focus {
+  border-color: rgb(var(--cc-accent));
+  box-shadow: none;
+}
+
+.cc-input::placeholder { color: rgb(var(--cc-subtle)); }
+
+/* Chips / tags */
+.cc-chip {
+  display: inline-flex;
+  align-items: center;
+  height: var(--cc-h-chip);
+  padding: 0 var(--cc-space-2);
+  background: rgba(var(--cc-tone, var(--cc-panel)), 0.35);
+  color: rgb(var(--cc-text));
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.07px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   7. TABLES
+   ------------------------------------------------------------------------ */
+.cc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.cc-table thead th {
+  height: var(--cc-h-table-head);
+  padding: 0 var(--cc-space-3);
+  text-align: left;
+  background: rgb(var(--cc-panel));
+  color: rgb(var(--cc-stark));
+  font-family: var(--cc-font-heading);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-heading);
+  white-space: nowrap;
+}
+.cc-table tbody td {
+  height: var(--cc-h-table-row);
+  padding: 0 var(--cc-space-3);
+  border-bottom: var(--cc-border-w) solid var(--cc-hairline);
+}
+.cc-table tbody tr:hover { background: rgb(var(--cc-surface-hover)); }
+/* Numeric columns use the mono stat face so digits align. */
+.cc-table .num { font-family: var(--cc-font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ---------------------------------------------------------------------------
+   8. SCROLLBARS
+   ---------------------------------------------------------------------------
+   The original hides scrollbars entirely. That is an accessibility problem —
+   it removes a scroll affordance and a position indicator. Default here to a
+   thin STYLED scrollbar; opt into hiding only for decorative strips.
+   ------------------------------------------------------------------------ */
+.cc-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--cc-panel-border)) transparent;
+}
+.cc-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.cc-scroll::-webkit-scrollbar-track { background: transparent; }
+.cc-scroll::-webkit-scrollbar-thumb { background: rgb(var(--cc-panel-border)); }
+.cc-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--cc-accent)); }
+
+.cc-scroll-hidden { scrollbar-width: none; }
+.cc-scroll-hidden::-webkit-scrollbar { display: none; }
+
+/* ---------------------------------------------------------------------------
+   9. OVERLAYS
+   ------------------------------------------------------------------------ */
+.cc-overlay {
+  position: absolute;
+  inset: 0;
+  padding: var(--cc-space-1);
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 99999;
+}
+.cc-dialog {
+  background: rgb(var(--cc-surface));
+  border: var(--cc-panel-double-w) double rgb(var(--cc-panel-border));
+  padding: var(--cc-space-4);
+}
+/* Dialogs enter slower than they leave — 225ms in, 125ms out. */
+.cc-dialog[data-state="open"]   { animation: cc-dialog-in  var(--cc-dur-dialog-in)  var(--cc-ease-out); }
+.cc-dialog[data-state="closed"] { animation: cc-dialog-out var(--cc-dur-dialog-out) var(--cc-ease); }
+
+@keyframes cc-dialog-in  { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@keyframes cc-dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.9); } }
+
+.cc-tooltip {
+  background: rgb(var(--cc-tooltip));
+  color: rgb(var(--cc-text));
+  border: var(--cc-border-w) solid rgb(var(--cc-panel-border));
+  padding: var(--cc-space-1) var(--cc-space-2);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   10. ACCESSIBILITY
+   ---------------------------------------------------------------------------
+   This aesthetic trends low-contrast and motion-heavy. These rules are not
+   optional polish — ship them.
+   ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .cc-skew-btn,
+  .cc-skew-btn::before,
+  .cc-skew-btn::after,
+  .cc-skew-label::before { transition: none !important; }
+}
+
+/* Never rely on the glow filter alone to signal state — pair it with an
+   outline so it survives forced-colors mode. */
+@media (forced-colors: active) {
+  .cc-glow-host:hover .cc-glow { filter: none; }
+  .cc-tab[aria-selected="true"] { outline: 2px solid; }
+  .cc-list-item.is-active { outline: 2px solid; }
+}
+
+.cc-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: rgb(var(--cc-accent));
+  color: rgb(var(--cc-anti));
+  padding: var(--cc-space-2) var(--cc-space-4);
+  z-index: 100000;
+}
+.cc-skip-link:focus { left: 0; }
+
+.cc-visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

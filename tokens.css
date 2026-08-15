@@ -1,0 +1,482 @@
+﻿/* ============================================================================
+   COMP/CON UI — DESIGN TOKENS
+   ----------------------------------------------------------------------------
+   Framework-agnostic. No dependencies. Drop this in before components.css.
+
+   All colors are stored as bare RGB triplets ("17, 21, 28") rather than hex,
+   so that any token can be used with an alpha channel:
+
+       background: rgb(var(--cc-panel));
+       background: rgba(var(--cc-panel), 0.35);   <- tonal fill
+       border-color: rgba(var(--cc-accent), 0.5);
+
+   Switch theme by setting the attribute on <html> or any subtree:
+
+       <html data-cc-theme="gms-dark">
+
+   Every theme below defines the SAME token names. Components must never
+   reference a raw color — only tokens. That contract is what lets you add a
+   brand palette later without touching a single component rule.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. STRUCTURAL TOKENS — shared across all themes
+   ------------------------------------------------------------------------ */
+:root {
+  /* -- Spacing: 4px base grid -------------------------------------------- */
+  --cc-space-1: 4px;
+  --cc-space-2: 8px;
+  --cc-space-3: 12px;
+  --cc-space-4: 16px;
+  --cc-space-5: 20px;
+  --cc-space-6: 24px;
+  --cc-space-8: 32px;
+
+  /* -- Density: COMP/CON is a dense instrument panel. These small heights
+        carry as much of the look as the colors do. Do not use a component
+        library's default sizes. -------------------------------------------- */
+  --cc-h-toolbar: 24px;
+  --cc-h-chip: 20px;
+  --cc-h-btn: 24px;
+  --cc-h-btn-lg: 40px;
+  --cc-h-input: 40px;
+  --cc-h-list-item: 40px;
+  --cc-h-table-row: 36px;
+  --cc-h-table-head: 40px;
+  --cc-h-footer-strip: 13px;
+  --cc-w-drawer: 320px;
+
+  /* -- Chamfer sizes (see components.css for the clip-path utilities) ----- */
+  --cc-notch-sm: 5px;
+  --cc-notch-md: 15px;
+  --cc-notch-lg: 30px;
+  --cc-notch-xl: 50px;
+  --cc-notch-panel: 24px;
+  --cc-notch-btn: 20px;
+
+  /* -- Borders ------------------------------------------------------------ */
+  --cc-hairline: rgba(255, 255, 255, 0.12);
+  --cc-border-w: 1px;
+  --cc-field-border-w: 2px;
+  --cc-panel-double-w: 5px;
+
+  /* -- Motion ------------------------------------------------------------- */
+  --cc-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --cc-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --cc-dur-micro: 0.2s;     /* icon/hover states       */
+  --cc-dur-card: 0.28s;     /* card elevation & fills  */
+  --cc-dur-panel: 0.3s;     /* panel toggles           */
+  --cc-dur-signature: 0.45s;/* skewed hero buttons     */
+  --cc-dur-dialog-in: 225ms;
+  --cc-dur-dialog-out: 125ms;
+
+  /* -- Typography --------------------------------------------------------- */
+  /* Helvetica Bold/Black and Consolas are licensed/system faces. The stacks
+     below degrade to shippable open alternatives. The uppercase transform and
+     wide tracking carry more of the identity than the exact typeface — keep
+     those even if you substitute the family. */
+  --cc-font-display: "Helvetica Black", "Archivo Black", "Helvetica Neue",
+                     Helvetica, Arial, sans-serif;
+  --cc-font-heading: "Helvetica Bold", "Archivo", "Helvetica Neue",
+                     Helvetica, Arial, sans-serif;
+  --cc-font-body: Inter, "Segoe UI", Roboto, system-ui, sans-serif;
+  --cc-font-mono: Consolas, "JetBrains Mono", "IBM Plex Mono",
+                  "Cascadia Code", ui-monospace, monospace;
+  --cc-font-terminal: "IBM VGA", "Px437 IBM VGA8", var(--cc-font-mono);
+
+  --cc-track-tight: 0.25px;
+  --cc-track-label: 1.25px;
+  --cc-track-heading: 2px;
+  --cc-track-wide: 3px;
+  --cc-track-display: 5px;
+  --cc-track-strip: 4px;
+
+  /* -- Elevation — used sparingly; most surfaces are flat ---------------- */
+  --cc-shadow-nav: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --cc-shadow-bar: 0 2px 4px -1px rgba(0, 0, 0, 0.2),
+                   0 4px 5px 0 rgba(0, 0, 0, 0.14),
+                   0 1px 10px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* ---------------------------------------------------------------------------
+   2. SEMANTIC CATEGORY COLORS
+   ---------------------------------------------------------------------------
+   A distinguishing feature of this system: domain concepts own colors. An item
+   of a given category is tinted by its own token everywhere it appears — list
+   row, detail card, chip, icon. Rename these to your own domain nouns; keep
+   the pattern.
+
+   RENAMED FOR PALETTE MAPPER. The shipped set was Lancer's nouns (weapon,
+   frame, heat...); this app's nouns are the stages of the image pipeline, so a
+   control panel carries the same tint as the readout it governs. Every stage
+   below appears as a --cc-tone on its section card.
+   ------------------------------------------------------------------------ */
+:root {
+  /* Pipeline stages — in the order pixels travel through them */
+  --cc-source: 35, 57, 67;        /* the untouched input image           */
+  --cc-palette: 27, 99, 97;       /* the palette library and its editing */
+  --cc-sample: 0, 118, 116;       /* eyedropper / extraction from source */
+  --cc-adjust: 82, 79, 59;        /* pre-map tone adjustments            */
+  --cc-resize: 71, 82, 92;        /* pixelate / rescale                  */
+  --cc-map: 103, 58, 183;         /* the nearest-colour mapping itself   */
+  --cc-dither: 8, 112, 98;        /* error diffusion / ordered threshold */
+  --cc-export: 153, 30, 42;       /* download / clipboard                */
+
+  /* Companion to the tones above. Category colours are deliberately the same
+     in every theme, so text sitting ON one of them cannot come from a theme
+     token — `stark` is near-black in the three light themes and would vanish.
+     Every tone above is dark enough to clear 4.5:1 against this. */
+  --cc-on-tone: 255, 255, 255;
+
+  /* Readout + status colors */
+  --cc-metric: 2, 132, 255;       /* distance-metric readouts            */
+  --cc-progress: 212, 225, 87;    /* render progress                     */
+  --cc-original: 69, 90, 100;     /* "before" side of the compare split  */
+  --cc-result: 22, 97, 184;       /* "after" side of the compare split   */
+}
+
+/* ---------------------------------------------------------------------------
+   3. THEME PALETTES
+   ---------------------------------------------------------------------------
+   THE TOKEN CONTRACT — every theme must define all 24:
+
+     Structure  background surface surface-hover panel light-panel dark-panel
+                stark-panel panel-border tooltip
+     Brand      primary secondary accent tertiary active highlight
+     Text       text light-text subtle stark anti
+     Status     error info success warning
+
+   Roles:
+     background   app canvas, the darkest/lightest ground
+     surface      cards, drawers, inputs — one step off the canvas
+     surface-hover  hover state for surface-level rows
+     panel        raised content block
+     light-panel  panel one step brighter; also the panel-block border partner
+     dark-panel   recessed block
+     stark-panel  high-contrast callout block
+     panel-border border color for the 5px double-rule frame
+     tooltip      floating overlay ground
+     primary      app chrome — toolbars, nav bars, primary fills
+     secondary    supporting brand accent
+     accent       the "live" highlight — selected tabs, sub-headings, focus
+     tertiary     third brand hue, used sparingly
+     active       hover/pressed target for primary surfaces
+     highlight    pale emphasis wash
+     text         DEFAULT BODY TEXT — note this is NOT white in dark themes
+     light-text   de-emphasized prose, flavor text
+     subtle       disabled / metadata
+     stark        maximum-contrast text (white in dark themes, black in light)
+     anti         inverse of stark
+   ------------------------------------------------------------------------ */
+
+/* --- gms-dark — THE DEFAULT. Match this one first. ---------------------- */
+:root,
+[data-cc-theme="gms-dark"] {
+  --cc-background: 17, 21, 28;
+  --cc-surface: 22, 28, 39;
+  --cc-surface-hover: 31, 40, 55;
+  --cc-panel: 33, 45, 64;
+  --cc-light-panel: 54, 65, 86;
+  --cc-dark-panel: 33, 33, 33;
+  --cc-stark-panel: 34, 85, 96;
+  --cc-panel-border: 54, 65, 86;
+  --cc-tooltip: 22, 28, 39;
+  --cc-primary: 128, 41, 50;
+  --cc-secondary: 72, 166, 167;
+  --cc-accent: 221, 85, 98;
+  --cc-tertiary: 153, 148, 30;
+  --cc-active: 217, 63, 78;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 201, 203, 163;   /* pale phosphor green — the signature */
+  --cc-light-text: 158, 158, 158;
+  --cc-subtle: 158, 158, 158;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 232, 72, 85;
+  --cc-info: 0, 114, 187;
+  --cc-success: 120, 192, 145;
+  --cc-warning: 243, 222, 44;
+}
+
+/* --- gms — the light counterpart of the default ------------------------ */
+[data-cc-theme="gms"] {
+  --cc-background: 244, 244, 244;
+  --cc-surface: 232, 232, 232;
+  --cc-surface-hover: 255, 255, 255;
+  --cc-panel: 204, 204, 204;
+  --cc-light-panel: 219, 219, 219;
+  --cc-dark-panel: 214, 214, 214;
+  --cc-stark-panel: 237, 237, 237;
+  --cc-panel-border: 138, 148, 158;
+  --cc-tooltip: 232, 232, 232;
+  --cc-primary: 153, 30, 42;
+  --cc-secondary: 30, 153, 141;
+  --cc-accent: 140, 20, 32;
+  --cc-tertiary: 33, 45, 64;
+  --cc-active: 217, 63, 78;
+  --cc-highlight: 201, 203, 163;
+  --cc-text: 33, 33, 33;
+  --cc-light-text: 66, 66, 66;
+  --cc-subtle: 158, 158, 158;
+  --cc-stark: 0, 0, 0;
+  --cc-anti: 255, 255, 255;
+  --cc-error: 244, 67, 54;
+  --cc-info: 21, 101, 192;
+  --cc-success: 104, 153, 30;
+  --cc-warning: 194, 130, 0;
+}
+
+/* --- msmc — teal/amber industrial ---------------------------------------- */
+[data-cc-theme="msmc"] {
+  --cc-background: 31, 40, 43;
+  --cc-surface: 33, 33, 33;
+  --cc-surface-hover: 41, 57, 64;
+  --cc-panel: 41, 57, 64;
+  --cc-light-panel: 34, 39, 41;
+  --cc-dark-panel: 27, 37, 41;
+  --cc-stark-panel: 19, 27, 31;
+  --cc-panel-border: 138, 148, 158;
+  --cc-tooltip: 18, 29, 33;
+  --cc-primary: 20, 100, 100;
+  --cc-secondary: 217, 143, 48;
+  --cc-accent: 29, 194, 194;
+  --cc-tertiary: 153, 148, 30;
+  --cc-active: 33, 138, 138;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 219, 219, 219;
+  --cc-light-text: 150, 160, 160;
+  --cc-subtle: 179, 185, 186;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 244, 67, 54;
+  --cc-info: 86, 155, 234;
+  --cc-success: 0, 200, 83;
+  --cc-warning: 255, 171, 0;
+}
+
+/* --- horus — black/green terminal --------------------------------------- */
+[data-cc-theme="horus"] {
+  --cc-background: 0, 0, 0;
+  --cc-surface: 33, 33, 33;
+  --cc-surface-hover: 51, 51, 51;
+  --cc-panel: 51, 51, 51;
+  --cc-light-panel: 43, 43, 43;
+  --cc-dark-panel: 17, 17, 17;
+  --cc-stark-panel: 34, 34, 34;
+  --cc-panel-border: 102, 102, 102;
+  --cc-tooltip: 34, 34, 34;
+  --cc-primary: 18, 97, 39;
+  --cc-secondary: 153, 153, 0;
+  --cc-accent: 0, 217, 0;
+  --cc-tertiary: 153, 153, 0;
+  --cc-active: 0, 166, 0;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 255, 255, 255;
+  --cc-light-text: 150, 160, 160;
+  --cc-subtle: 179, 185, 186;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 229, 0, 0;
+  --cc-info: 0, 229, 229;
+  --cc-success: 0, 200, 83;
+  --cc-warning: 229, 229, 0;
+}
+
+/* --- ha — magenta ------------------------------------------------------- */
+[data-cc-theme="ha"] {
+  --cc-background: 43, 43, 43;
+  --cc-surface: 55, 55, 55;
+  --cc-surface-hover: 71, 71, 71;
+  --cc-panel: 51, 51, 51;
+  --cc-light-panel: 68, 68, 68;
+  --cc-dark-panel: 17, 17, 17;
+  --cc-stark-panel: 34, 34, 34;
+  --cc-panel-border: 102, 102, 102;
+  --cc-tooltip: 34, 34, 34;
+  --cc-primary: 119, 22, 117;
+  --cc-secondary: 207, 75, 219;
+  --cc-accent: 224, 128, 222;
+  --cc-tertiary: 207, 75, 219;
+  --cc-active: 161, 94, 168;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 255, 255, 255;
+  --cc-light-text: 150, 160, 160;
+  --cc-subtle: 179, 185, 186;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 244, 67, 54;
+  --cc-info: 21, 101, 192;
+  --cc-success: 0, 200, 83;
+  --cc-warning: 255, 171, 0;
+}
+
+/* --- ipsn — light blue/orange ------------------------------------------- */
+[data-cc-theme="ipsn"] {
+  --cc-background: 219, 219, 219;
+  --cc-surface: 201, 199, 199;
+  --cc-surface-hover: 214, 214, 214;
+  --cc-panel: 171, 178, 183;
+  --cc-light-panel: 219, 219, 219;
+  --cc-dark-panel: 214, 214, 214;
+  --cc-stark-panel: 237, 237, 237;
+  --cc-panel-border: 138, 148, 158;
+  --cc-tooltip: 232, 232, 232;
+  --cc-primary: 25, 82, 162;
+  --cc-secondary: 199, 118, 52;
+  --cc-accent: 25, 162, 162;
+  --cc-tertiary: 199, 118, 52;
+  --cc-active: 25, 118, 210;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 33, 33, 33;
+  --cc-light-text: 66, 66, 66;
+  --cc-subtle: 92, 92, 92;
+  --cc-stark: 0, 0, 0;
+  --cc-anti: 255, 255, 255;
+  --cc-error: 244, 67, 54;
+  --cc-info: 21, 101, 192;
+  --cc-success: 0, 200, 83;
+  --cc-warning: 255, 171, 0;
+}
+
+/* --- ssc — warm cream/gold (light) -------------------------------------- */
+[data-cc-theme="ssc"] {
+  --cc-background: 238, 232, 213;
+  --cc-surface: 219, 207, 195;
+  --cc-surface-hover: 230, 217, 204;
+  --cc-panel: 234, 219, 203;
+  --cc-light-panel: 234, 219, 203;
+  --cc-dark-panel: 199, 181, 163;
+  --cc-stark-panel: 90, 76, 63;
+  --cc-panel-border: 138, 148, 158;
+  --cc-tooltip: 214, 201, 176;
+  --cc-primary: 209, 146, 10;
+  --cc-secondary: 104, 93, 153;
+  --cc-accent: 181, 137, 0;
+  --cc-tertiary: 104, 93, 153;
+  --cc-active: 137, 97, 11;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 94, 75, 48;
+  --cc-light-text: 140, 111, 70;
+  --cc-subtle: 115, 110, 145;
+  --cc-stark: 0, 0, 0;
+  --cc-anti: 255, 255, 255;
+  --cc-error: 204, 71, 45;
+  --cc-info: 66, 118, 179;
+  --cc-success: 16, 112, 56;
+  --cc-warning: 255, 171, 0;
+}
+
+/* --- horizon — deep teal/orange ----------------------------------------- */
+[data-cc-theme="horizon"] {
+  --cc-background: 4, 15, 17;
+  --cc-surface: 33, 33, 33;
+  --cc-surface-hover: 51, 51, 51;
+  --cc-panel: 51, 51, 51;
+  --cc-light-panel: 43, 43, 43;
+  --cc-dark-panel: 17, 17, 17;
+  --cc-stark-panel: 34, 34, 34;
+  --cc-panel-border: 102, 102, 102;
+  --cc-tooltip: 34, 34, 34;
+  --cc-primary: 35, 57, 67;
+  --cc-secondary: 29, 141, 100;
+  --cc-accent: 206, 113, 0;
+  --cc-tertiary: 153, 148, 30;
+  --cc-active: 202, 127, 13;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 255, 255, 255;
+  --cc-light-text: 150, 160, 160;
+  --cc-subtle: 179, 185, 186;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 229, 76, 41;
+  --cc-info: 126, 189, 194;
+  --cc-success: 0, 200, 83;
+  --cc-warning: 255, 208, 39;
+}
+
+/* --- galsim — grey/orange ----------------------------------------------- */
+[data-cc-theme="galsim"] {
+  --cc-background: 43, 43, 43;
+  --cc-surface: 55, 55, 55;
+  --cc-surface-hover: 71, 71, 71;
+  --cc-panel: 45, 44, 41;
+  --cc-light-panel: 68, 68, 68;
+  --cc-dark-panel: 17, 17, 17;
+  --cc-stark-panel: 34, 34, 34;
+  --cc-panel-border: 102, 102, 102;
+  --cc-tooltip: 34, 34, 34;
+  --cc-primary: 227, 102, 0;
+  --cc-secondary: 122, 191, 225;
+  --cc-accent: 73, 116, 191;
+  --cc-tertiary: 122, 191, 225;
+  --cc-active: 42, 65, 107;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 255, 255, 255;
+  --cc-light-text: 150, 160, 160;
+  --cc-subtle: 179, 185, 186;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 244, 67, 54;
+  --cc-info: 21, 101, 192;
+  --cc-success: 16, 161, 76;
+  --cc-warning: 232, 159, 12;
+}
+
+/* --- solarized ---------------------------------------------------------- */
+[data-cc-theme="solarized"] {
+  --cc-background: 41, 54, 58;
+  --cc-surface: 33, 42, 46;
+  --cc-surface-hover: 41, 57, 64;
+  --cc-panel: 76, 88, 94;
+  --cc-light-panel: 58, 63, 65;
+  --cc-dark-panel: 30, 51, 59;
+  --cc-stark-panel: 36, 52, 59;
+  --cc-panel-border: 101, 112, 122;
+  --cc-tooltip: 22, 41, 48;
+  --cc-primary: 27, 78, 78;
+  --cc-secondary: 67, 172, 81;
+  --cc-accent: 47, 163, 163;
+  --cc-tertiary: 67, 172, 81;
+  --cc-active: 40, 114, 114;
+  --cc-highlight: 228, 229, 209;
+  --cc-text: 159, 169, 173;
+  --cc-light-text: 172, 194, 194;
+  --cc-subtle: 133, 146, 148;
+  --cc-stark: 216, 216, 216;
+  --cc-anti: 54, 54, 54;
+  --cc-error: 180, 68, 60;
+  --cc-info: 77, 124, 179;
+  --cc-success: 15, 133, 64;
+  --cc-warning: 170, 120, 21;
+}
+
+/* --- hc-dark — high contrast / accessibility ----------------------------
+   Ship this. It is the accessible escape hatch from the low-contrast
+   phosphor aesthetic, and pairs with the reduced-motion rules in
+   components.css. -------------------------------------------------------- */
+[data-cc-theme="hc-dark"] {
+  --cc-background: 0, 0, 0;
+  --cc-surface: 21, 22, 22;
+  --cc-surface-hover: 0, 0, 0;
+  --cc-panel: 27, 33, 43;
+  --cc-light-panel: 20, 24, 31;
+  --cc-dark-panel: 33, 33, 33;
+  --cc-stark-panel: 0, 0, 0;
+  --cc-panel-border: 72, 80, 94;
+  --cc-tooltip: 0, 0, 0;
+  --cc-primary: 75, 12, 19;
+  --cc-secondary: 81, 235, 238;
+  --cc-accent: 255, 171, 179;
+  --cc-tertiary: 231, 225, 44;
+  --cc-active: 255, 171, 179;
+  --cc-highlight: 255, 255, 255;
+  --cc-text: 255, 255, 255;
+  --cc-light-text: 255, 255, 255;
+  --cc-subtle: 167, 167, 167;
+  --cc-stark: 255, 255, 255;
+  --cc-anti: 0, 0, 0;
+  --cc-error: 255, 0, 21;
+  --cc-info: 0, 157, 255;
+  --cc-success: 0, 83, 29;
+  --cc-warning: 255, 230, 0;
+}

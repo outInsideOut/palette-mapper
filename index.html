@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en" data-cc-theme="gms-dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PALETTE MAPPER</title>
+<meta name="description" content="Paste an image, build a colour palette, and snap every pixel to its nearest palette entry. Runs entirely in your browser.">
+
+<!-- Relative paths only: a project Pages site is served from /<repo>/, so a
+     leading slash would 404. tokens.css must come first. -->
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+
+<!-- Optional webfonts. Left commented out on purpose: the page is otherwise
+     zero-request and works offline / from file://, and the uppercase transform
+     plus wide tracking carry more of the identity than the letterforms do.
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;700&display=swap">
+-->
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='8' height='8' fill='%23DD5562'/><rect x='8' width='8' height='8' fill='%23C9CBA3'/><rect y='8' width='8' height='8' fill='%23212D40'/><rect x='8' y='8' width='8' height='8' fill='%23802932'/></svg>">
+
+<style>
+/* ===========================================================================
+   PALETTE MAPPER — app layer
+   ---------------------------------------------------------------------------
+   Layout and app-specific components only. Every colour resolves through a
+   token from tokens.css; nothing here hardcodes one. Heights come from the
+   density scale (--cc-h-*), corners are cut with the clip-path utilities.
+   ======================================================================== */
+
+html, body { height: 100%; }
+
+body.cc-app {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Clear the fixed 13px footer strip. */
+  padding-bottom: var(--cc-h-footer-strip);
+}
+
+/* --- Top chrome ---------------------------------------------------------- */
+.pm-toolbar { flex: 0 0 auto; }
+.pm-toolbar .pm-wordmark {
+  font-family: var(--cc-font-display);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: var(--cc-track-heading);
+  text-transform: uppercase;
+}
+.pm-toolbar-spacer { flex: 1 1 auto; }
+.pm-toolbar .cc-btn { min-height: 18px; font-size: 10px; padding: 0 var(--cc-space-2); }
+.pm-toolbar select {
+  height: 18px;
+  padding: 0 var(--cc-space-1);
+  background: rgb(var(--cc-surface));
+  border: var(--cc-border-w) solid var(--cc-hairline);
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-body);
+  font-size: 10px;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+}
+.pm-toolbar select:focus-visible { outline: 2px solid rgb(var(--cc-accent)); outline-offset: 1px; }
+
+/* --- Three-column frame -------------------------------------------------- */
+.pm-frame {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: var(--cc-w-drawer) minmax(0, 1fr) var(--cc-w-drawer);
+  min-height: 0;
+}
+
+.pm-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-2);
+  min-height: 0;
+  padding: var(--cc-space-2);
+  overflow-y: auto;
+  background: rgb(var(--cc-surface));
+}
+.pm-rail--left  { border-right: var(--cc-border-w) solid var(--cc-hairline); }
+.pm-rail--right { border-left:  var(--cc-border-w) solid var(--cc-hairline); }
+
+/* --- Section cards ------------------------------------------------------- */
+/* Each carries a pipeline-stage tone; the tonal fill sits at 22% so body text
+   stays readable on it. */
+.pm-section { flex: 0 0 auto; }
+.pm-section > .cc-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  min-height: var(--cc-h-chip);
+  /* The header band is filled with the stage tone, which is fixed across
+     themes — so its text must be too. See --cc-on-tone in tokens.css. */
+  color: rgb(var(--cc-on-tone));
+}
+.pm-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-2);
+  padding: var(--cc-space-3);
+}
+.pm-section-title {
+  font-family: var(--cc-font-heading);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: var(--cc-track-heading);
+}
+.pm-section-note {
+  margin-left: auto;
+  font-family: var(--cc-font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* --- Contrast corrections ------------------------------------------------
+   Every value below was measured across all 11 themes; each rule fixes a pair
+   that fell under 4.5:1. All of them stay inside the token contract — what
+   changes is which token applies, never a raw colour. */
+
+/* .cc-label ships as `subtle`, tuned for a flat surface. Over a tonal fill it
+   drops too low, so labels on tinted ground step up to the body text token. */
+.pm-section-body .cc-label { color: rgb(var(--cc-text)); }
+/* The stage bar sits on `panel`, which runs closer to the body text token than
+   `surface` does — its labels take the max-contrast token instead. */
+.pm-stage-bar .cc-label { color: rgb(var(--cc-stark)); }
+
+/* .cc-btn--outline puts `accent` on the card as text. Accent is the "live"
+   highlight and is picked for visibility as a fill, not as small type — it
+   fails in six themes. Keep the accent border, read the label in body text. */
+.cc-btn--outline { color: rgb(var(--cc-text)); }
+
+/* Chrome that pairs `primary` with `stark` inverts in the themes whose chrome
+   is light; there, `anti` is the high-contrast partner. */
+[data-cc-theme="gms"] .cc-toolbar,
+[data-cc-theme="ipsn"] .cc-toolbar,
+[data-cc-theme="galsim"] .cc-toolbar,
+[data-cc-theme="gms"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
+[data-cc-theme="ipsn"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
+[data-cc-theme="galsim"] .cc-btn:not(.cc-btn--outline):not(.cc-btn--text),
+[data-cc-theme="gms"] .cc-skew-label,
+[data-cc-theme="ipsn"] .cc-skew-label,
+[data-cc-theme="galsim"] .cc-skew-label { color: rgb(var(--cc-anti)); }
+
+/* The 22% tonal fill is calibrated for a dark ground. Over a light surface it
+   drags the card to mid-grey, where neither text token clears 4.5:1. The light
+   themes get a lighter tint — same identity, contrast intact. */
+[data-cc-theme="gms"] .pm-section.cc-tonal,
+[data-cc-theme="ipsn"] .pm-section.cc-tonal,
+[data-cc-theme="ssc"] .pm-section.cc-tonal { background: rgba(var(--cc-tone), 0.1); }
+
+/* The toolbar chip is filled with a fixed stage tone, so like the card headers
+   its text cannot come from a theme token. */
+.pm-toolbar .cc-chip {
+  background: rgb(var(--cc-source));
+  color: rgb(var(--cc-on-tone));
+}
+
+.pm-row { display: flex; align-items: center; gap: var(--cc-space-2); }
+.pm-row--wrap { flex-wrap: wrap; }
+.pm-grow { flex: 1 1 auto; min-width: 0; }
+
+/* --- Controls ------------------------------------------------------------ */
+/* Fields sit on a tinted card, so they take the theme's own ground colour to
+   separate from it. A flat rgba(0,0,0,…) wash would read as a dark hole — and
+   an unreadable one — in the three light themes. */
+.pm-select, .pm-text {
+  width: 100%;
+  height: var(--cc-h-input);
+  padding: 0 var(--cc-space-2);
+  background: rgb(var(--cc-background));
+  border: var(--cc-field-border-w) solid rgb(var(--cc-panel-border));
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-body);
+  font-size: 12px;
+  letter-spacing: var(--cc-track-tight);
+}
+.pm-text--mono { font-family: var(--cc-font-mono); text-transform: uppercase; }
+.pm-select:focus, .pm-text:focus { outline: none; border-color: rgb(var(--cc-accent)); }
+
+.pm-textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: var(--cc-space-2);
+  background: rgb(var(--cc-background));
+  border: var(--cc-field-border-w) solid rgb(var(--cc-panel-border));
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+  resize: vertical;
+}
+.pm-textarea:focus { outline: none; border-color: rgb(var(--cc-accent)); }
+
+.pm-btn-row { display: flex; flex-wrap: wrap; gap: var(--cc-space-1); }
+.pm-btn-row .cc-btn { flex: 1 1 auto; }
+
+/* Slider rows: label, live value readout, then the track on its own line. */
+.pm-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cc-space-2);
+}
+.pm-slider-val {
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+  font-weight: bolder;
+  color: rgb(var(--cc-stark));
+  font-variant-numeric: tabular-nums;
+}
+.pm-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+.pm-range::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgb(var(--cc-panel-border));
+}
+.pm-range::-moz-range-track { height: 4px; background: rgb(var(--cc-panel-border)); }
+/* Square thumb — a round one would break rule zero. */
+.pm-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 8px;
+  height: 14px;
+  margin-top: -5px;
+  background: rgb(var(--cc-accent));
+  border: 0;
+}
+.pm-range::-moz-range-thumb {
+  width: 8px;
+  height: 14px;
+  background: rgb(var(--cc-accent));
+  border: 0;
+  border-radius: 0;
+}
+.pm-range:focus-visible { outline: 2px solid rgb(var(--cc-accent)); outline-offset: 2px; }
+
+.pm-check {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+}
+.pm-check input { accent-color: rgb(var(--cc-accent)); width: 13px; height: 13px; }
+
+/* --- Palette library ----------------------------------------------------- */
+.pm-lib { max-height: 168px; overflow-y: auto; }
+.pm-lib-item {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  width: 100%;
+  min-height: var(--cc-h-table-row);
+  padding: 0 var(--cc-space-2);
+  border: 0;
+  border-bottom: var(--cc-border-w) solid var(--cc-hairline);
+  background: transparent;
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-body);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pm-lib-item:hover { background: rgb(var(--cc-surface-hover)); }
+.pm-lib-item[aria-current="true"] {
+  background: rgba(var(--cc-accent), 0.16);
+  /* Selection is an outline, not a glow — filter is dropped in forced-colors. */
+  outline: 2px solid rgb(var(--cc-accent));
+  outline-offset: -2px;
+}
+.pm-lib-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-lib-count {
+  font-family: var(--cc-font-mono);
+  font-size: 10px;
+  color: rgb(var(--cc-subtle));
+  font-variant-numeric: tabular-nums;
+}
+.pm-lib-strip { display: flex; width: 56px; height: 12px; flex: 0 0 auto; }
+.pm-lib-strip span { flex: 1 1 auto; }
+.pm-lib-del {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--cc-subtle));
+  font-family: var(--cc-font-mono);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pm-lib-del:hover { color: rgb(var(--cc-error)); background: rgba(var(--cc-error), 0.14); }
+
+/* --- Swatch grid --------------------------------------------------------- */
+.pm-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+  gap: var(--cc-space-1);
+  max-height: 216px;
+  overflow-y: auto;
+}
+.pm-swatch {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  /* 5px cut — the chip-scale chamfer. */
+  clip-path: polygon(100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 0);
+}
+.pm-swatch[aria-pressed="true"] { outline: 2px solid rgb(var(--cc-accent)); outline-offset: -2px; }
+.pm-swatch:focus-visible { outline: 2px solid rgb(var(--cc-stark)); outline-offset: -2px; }
+.pm-swatch--add {
+  background: transparent;
+  border: var(--cc-field-border-w) dashed rgb(var(--cc-panel-border));
+  color: rgb(var(--cc-subtle));
+  font-size: 14px;
+  line-height: 1;
+}
+.pm-swatch--add:hover { border-color: rgb(var(--cc-accent)); color: rgb(var(--cc-accent)); }
+.pm-swatch-drag { opacity: 0.35; }
+.pm-swatch-over { outline: 2px dashed rgb(var(--cc-accent)); outline-offset: -2px; }
+
+.pm-editor { display: none; flex-direction: column; gap: var(--cc-space-2); }
+.pm-editor[data-open="true"] { display: flex; }
+.pm-editor input[type="color"] {
+  width: 48px;
+  height: var(--cc-h-input);
+  padding: 0;
+  border: var(--cc-field-border-w) solid rgb(var(--cc-panel-border));
+  background: transparent;
+  cursor: pointer;
+}
+
+/* --- Centre stage -------------------------------------------------------- */
+.pm-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: rgb(var(--cc-background));
+}
+
+.pm-stage-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  flex-wrap: wrap;
+  min-height: var(--cc-h-toolbar);
+  padding: var(--cc-space-1) var(--cc-space-2);
+  background: rgb(var(--cc-panel));
+  border-bottom: var(--cc-border-w) solid var(--cc-hairline);
+}
+.pm-stage-bar .cc-btn { min-height: 20px; font-size: 10px; padding: 0 var(--cc-space-2); }
+
+.pm-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: var(--cc-space-4);
+}
+
+/* The compare stack: original underneath, result on top, clipped by the split. */
+.pm-canvas-stack { position: relative; line-height: 0; }
+.pm-canvas-stack canvas {
+  display: block;
+  image-rendering: pixelated;
+  /* Alpha checkerboard, drawn from tokens so it themes with everything else. */
+  background-color: rgb(var(--cc-dark-panel));
+  background-image:
+    linear-gradient(45deg, rgba(var(--cc-stark), 0.06) 25%, transparent 25%, transparent 75%, rgba(var(--cc-stark), 0.06) 75%),
+    linear-gradient(45deg, rgba(var(--cc-stark), 0.06) 25%, transparent 25%, transparent 75%, rgba(var(--cc-stark), 0.06) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+#pm-canvas-result { position: absolute; inset: 0; }
+
+.pm-split-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgb(var(--cc-accent));
+  cursor: ew-resize;
+  touch-action: none;
+}
+.pm-split-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  background: rgb(var(--cc-accent));
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+.pm-split-tag {
+  position: absolute;
+  top: var(--cc-space-1);
+  z-index: 2;
+  height: var(--cc-h-chip);
+  padding: 0 var(--cc-space-2);
+  background: rgba(var(--cc-tone, var(--cc-panel)), 0.85);
+  color: rgb(var(--cc-stark));
+  font-size: 9px;
+  line-height: var(--cc-h-chip);
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.pm-split-tag--a { left: var(--cc-space-1); }
+.pm-split-tag--b { right: var(--cc-space-1); }
+
+.pm-eyedropper-on .pm-canvas-stack { cursor: crosshair; }
+
+/* --- Drop zone ----------------------------------------------------------- */
+.pm-drop {
+  display: grid;
+  place-items: center;
+  gap: var(--cc-space-3);
+  width: min(560px, 100%);
+  padding: var(--cc-space-8);
+  border: var(--cc-field-border-w) dashed rgb(var(--cc-panel-border));
+  text-align: center;
+}
+/* An explicit display in the rule above would otherwise beat the UA's
+   [hidden] { display: none }, leaving the drop zone visible under the image. */
+.pm-drop[hidden] { display: none; }
+.pm-drop h2 { margin: 0; }
+.pm-drop p { margin: 0; max-width: 42ch; }
+.pm-drop kbd {
+  display: inline-block;
+  padding: 1px var(--cc-space-1);
+  background: rgb(var(--cc-panel));
+  border: var(--cc-border-w) solid var(--cc-hairline);
+  color: rgb(var(--cc-stark));   /* body text is too close to `panel` in solarized */
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+}
+body.pm-dragging .pm-drop,
+body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var(--cc-accent)); outline-offset: -6px; }
+
+/* --- Progress + status --------------------------------------------------- */
+.pm-progress {
+  position: relative;
+  height: 3px;
+  background: rgb(var(--cc-panel-border));
+  overflow: hidden;
+}
+.pm-progress > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: rgb(var(--cc-progress));
+  transition: width 80ms linear;
+}
+
+.pm-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--cc-h-footer-strip) + var(--cc-space-3));
+  z-index: 60;
+  transform: translateX(-50%);
+  max-width: min(90vw, 520px);
+  padding: var(--cc-space-2) var(--cc-space-4);
+  background: rgb(var(--cc-tooltip));
+  color: rgb(var(--cc-stark));
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+  letter-spacing: var(--cc-track-tight);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+.pm-toast[hidden] { display: none; }
+.pm-toast--error { background: rgb(var(--cc-error)); }
+
+/* --- Export ------------------------------------------------------------- */
+/* Exactly one skewed hero button in the app — this is it. */
+.pm-export-wrap { height: 56px; margin: var(--cc-space-2) 0 0; }
+.pm-export-wrap .cc-skew-btn { height: 56px; }
+.pm-export-wrap .cc-skew-btn::before,
+.pm-export-wrap .cc-skew-btn::after { height: 57px; }
+.pm-export-wrap .cc-skew-label { font-size: 17pt; left: 42px; }
+
+/* --- Footer strip -------------------------------------------------------- */
+.pm-footer { display: flex; gap: var(--cc-space-4); }
+.pm-footer > span { flex: 0 0 auto; }
+
+/* --- Responsive ---------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .pm-frame { grid-template-columns: 260px minmax(0, 1fr) 260px; }
+}
+@media (max-width: 900px) {
+  body.cc-app { overflow: auto; }
+  .pm-frame { grid-template-columns: minmax(0, 1fr); }
+  .pm-rail { max-height: none; overflow: visible; }
+  .pm-rail--left  { border-right: 0; border-bottom: var(--cc-border-w) solid var(--cc-hairline); }
+  .pm-rail--right { border-left: 0;  border-top:    var(--cc-border-w) solid var(--cc-hairline); }
+  .pm-stage { order: -1; min-height: 60vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pm-progress > i { transition: none; }
+}
+</style>
+</head>
+
+<body class="cc-app">
+<a class="cc-skip-link" href="#pm-stage">Skip to image</a>
+
+<!-- ===================== TOP CHROME ===================== -->
+<header class="cc-toolbar pm-toolbar">
+  <span class="pm-wordmark">Palette&nbsp;Mapper</span>
+  <span class="cc-chip cc-clip-sm" style="--cc-tone: var(--cc-source)" id="pm-dims">NO IMAGE</span>
+  <span class="pm-toolbar-spacer"></span>
+  <label class="cc-visually-hidden" for="pm-theme">Theme</label>
+  <select id="pm-theme">
+    <option value="gms-dark">GMS Dark</option>
+    <option value="gms">GMS</option>
+    <option value="msmc">MSMC</option>
+    <option value="horus">HORUS</option>
+    <option value="ha">HA</option>
+    <option value="ipsn">IPS-N</option>
+    <option value="ssc">SSC</option>
+    <option value="horizon">Horizon</option>
+    <option value="galsim">GalSim</option>
+    <option value="solarized">Solarized</option>
+    <option value="hc-dark">High Contrast</option>
+  </select>
+  <button type="button" class="cc-btn cc-clip-sm" id="pm-open">Open Image</button>
+  <input type="file" id="pm-file" accept="image/*" class="cc-visually-hidden">
+</header>
+
+<div class="pm-frame">
+
+  <!-- ===================== LEFT RAIL — PALETTE ===================== -->
+  <aside class="pm-rail pm-rail--left cc-scroll" aria-label="Palette library">
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-palette)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Palette</span>
+        <span class="pm-section-note" id="pm-swatch-count">0 colours</span>
+      </div>
+      <div class="pm-section-body">
+        <input type="text" class="pm-text" id="pm-pal-name" placeholder="Untitled palette" aria-label="Palette name" maxlength="40">
+
+        <div class="pm-swatches cc-scroll" id="pm-swatches" role="list" aria-label="Palette swatches"></div>
+
+        <div class="pm-editor" id="pm-editor" data-open="false">
+          <div class="pm-row">
+            <input type="color" id="pm-editor-color" aria-label="Swatch colour">
+            <input type="text" class="pm-text pm-text--mono pm-grow" id="pm-editor-hex" maxlength="7" spellcheck="false" aria-label="Swatch hex value">
+            <button type="button" class="cc-btn cc-clip-sm" id="pm-editor-del" title="Remove this swatch">Del</button>
+          </div>
+        </div>
+
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-clip-sm" id="pm-save">Save</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-dup">Duplicate</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-sort">Sort</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-clear-pal">Clear</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-sample)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Sample from image</span>
+      </div>
+      <div class="pm-section-body">
+        <button type="button" class="cc-btn cc-clip-btn" id="pm-eyedropper" aria-pressed="false">Eyedropper: off</button>
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Extract colours</span>
+            <span class="pm-slider-val" id="pm-extract-n-val">16</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-extract-n" min="2" max="64" step="1" value="16" aria-label="Number of colours to extract">
+        </div>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-clip-sm" id="pm-extract">Extract</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-extract-add">Add to palette</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-palette)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Library</span>
+        <span class="pm-section-note" id="pm-lib-count">0 saved</span>
+      </div>
+      <div class="pm-section-body">
+        <div class="pm-lib cc-scroll" id="pm-lib" role="list" aria-label="Saved palettes"></div>
+
+        <label class="cc-label" for="pm-preset">Presets</label>
+        <select class="pm-select" id="pm-preset">
+          <option value="">Load a preset…</option>
+        </select>
+
+        <label class="cc-label" for="pm-import-text">Paste hex codes</label>
+        <textarea class="pm-textarea" id="pm-import-text" spellcheck="false"
+          placeholder="#1a1c2c #5d275d #b13e53 … — any text; hex codes are scraped out of it"></textarea>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-clip-sm" id="pm-import-paste">Import text</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-import-file">Import file</button>
+          <input type="file" id="pm-pal-file" accept=".hex,.txt,.gpl,.pal,.json,.act,text/plain,application/json" class="cc-visually-hidden">
+        </div>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-hex">.hex</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-gpl">.gpl</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy-hex">Copy list</button>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ===================== CENTRE — STAGE ===================== -->
+  <main class="pm-stage" id="pm-stage">
+    <div class="pm-stage-bar">
+      <span class="cc-label">View</span>
+      <button type="button" class="cc-btn cc-clip-sm" id="pm-view-split" aria-pressed="true">Split</button>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-view-before" aria-pressed="false">Before</button>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-view-after" aria-pressed="false">After</button>
+      <span style="width: var(--cc-space-4)"></span>
+      <span class="cc-label">Zoom</span>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-zoom-out">−</button>
+      <span class="pm-slider-val" id="pm-zoom-val">FIT</span>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-zoom-in">+</button>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-zoom-fit">Fit</button>
+      <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-zoom-1">1:1</button>
+    </div>
+    <div class="pm-progress"><i id="pm-progress-bar"></i></div>
+
+    <div class="pm-viewport cc-scroll" id="pm-viewport">
+      <div class="pm-drop" id="pm-drop">
+        <h2 class="cc-heading h2">Paste an image</h2>
+        <p class="cc-effect-text">
+          Press <kbd>Ctrl</kbd>+<kbd>V</kbd>, drop a file anywhere on this page,
+          or use <em>Open Image</em>. Nothing is uploaded — all processing happens
+          in this browser.
+        </p>
+      </div>
+
+      <div class="pm-canvas-stack" id="pm-canvas-stack" hidden>
+        <canvas id="pm-canvas-original" aria-label="Original image"></canvas>
+        <canvas id="pm-canvas-result" aria-label="Palette-mapped result"></canvas>
+        <span class="pm-split-tag pm-split-tag--a" style="--cc-tone: var(--cc-original)">Original</span>
+        <span class="pm-split-tag pm-split-tag--b" style="--cc-tone: var(--cc-result)">Mapped</span>
+        <div class="pm-split-handle" id="pm-split-handle" role="separator"
+             aria-label="Compare split position" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="50" tabindex="0"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== RIGHT RAIL — PROCESSING ===================== -->
+  <aside class="pm-rail pm-rail--right cc-scroll" aria-label="Processing controls">
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-map)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Mapping</span>
+        <span class="pm-section-note" id="pm-time">—</span>
+      </div>
+      <div class="pm-section-body">
+        <label class="cc-label" for="pm-metric">Distance metric</label>
+        <select class="pm-select" id="pm-metric">
+          <option value="oklab">OKLab — perceptual</option>
+          <option value="srgb">sRGB — euclidean</option>
+          <option value="redmean">Weighted RGB — redmean</option>
+        </select>
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Alpha cutoff</span>
+            <span class="pm-slider-val" id="pm-alpha-cut-val">8</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-alpha-cut" min="1" max="255" step="1" value="8" aria-label="Alpha cutoff">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-live" checked> Live preview</label>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-dither)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Dither</span>
+      </div>
+      <div class="pm-section-body">
+        <label class="cc-label" for="pm-dither">Mode</label>
+        <select class="pm-select" id="pm-dither">
+          <option value="none">None</option>
+          <option value="fs">Floyd–Steinberg</option>
+          <option value="bayer4">Ordered — Bayer 4×4</option>
+          <option value="bayer8">Ordered — Bayer 8×8</option>
+        </select>
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Strength</span>
+            <span class="pm-slider-val" id="pm-dither-amt-val">100%</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-dither-amt" min="0" max="100" step="1" value="100" aria-label="Dither strength">
+        </div>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-resize)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Pixelate</span>
+        <span class="pm-section-note" id="pm-work-dims">—</span>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Pixel size</span>
+            <span class="pm-slider-val" id="pm-pixel-val">1×</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-pixel" min="1" max="32" step="1" value="1" aria-label="Pixel size">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-smooth" checked> Average when downscaling</label>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-adjust)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Pre-map adjust</span>
+        <button type="button" class="cc-btn cc-btn--text cc-clip-sm pm-section-note" id="pm-adjust-reset">Reset</button>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head"><span class="cc-label">Brightness</span><span class="pm-slider-val" id="pm-brightness-val">0</span></div>
+          <input type="range" class="pm-range" id="pm-brightness" min="-100" max="100" step="1" value="0" aria-label="Brightness">
+        </div>
+        <div>
+          <div class="pm-slider-head"><span class="cc-label">Contrast</span><span class="pm-slider-val" id="pm-contrast-val">0</span></div>
+          <input type="range" class="pm-range" id="pm-contrast" min="-100" max="100" step="1" value="0" aria-label="Contrast">
+        </div>
+        <div>
+          <div class="pm-slider-head"><span class="cc-label">Saturation</span><span class="pm-slider-val" id="pm-saturation-val">0</span></div>
+          <input type="range" class="pm-range" id="pm-saturation" min="-100" max="100" step="1" value="0" aria-label="Saturation">
+        </div>
+        <div>
+          <div class="pm-slider-head"><span class="cc-label">Gamma</span><span class="pm-slider-val" id="pm-gamma-val">1.00</span></div>
+          <input type="range" class="pm-range" id="pm-gamma" min="20" max="300" step="1" value="100" aria-label="Gamma">
+        </div>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-export)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Export</span>
+        <span class="pm-section-note" id="pm-export-dims">—</span>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Upscale</span>
+            <span class="pm-slider-val" id="pm-export-scale-val">1×</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-export-scale" min="1" max="8" step="1" value="1" aria-label="Export upscale factor">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-export-full" checked> Render at full resolution</label>
+        <div class="pm-btn-row">
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy">Copy PNG</button>
+          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-render">Render full</button>
+        </div>
+        <div class="cc-skew-wrap pm-export-wrap">
+          <button type="button" class="cc-skew-btn" id="pm-download">
+            <span class="cc-skew-label">Download</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<div class="pm-toast" id="pm-toast" role="status" aria-live="polite" hidden></div>
+
+<footer class="cc-panel-footer pm-footer">
+  <span id="pm-status">Ready — paste an image to begin</span>
+  <span id="pm-foot-src">SRC —</span>
+  <span id="pm-foot-work">WORK —</span>
+  <span id="pm-foot-pal">PAL —</span>
+  <span id="pm-foot-metric">OKLAB</span>
+</footer>
+
+<!-- Classic script, not a module: ES modules are blocked by CORS on file://,
+     and this page is meant to work both hosted and opened straight from disk. -->
+<script src="app.js"></script>
+</body>
+</html>
