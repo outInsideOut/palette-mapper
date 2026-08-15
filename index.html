@@ -337,7 +337,8 @@ body.cc-app {
 
 .pm-editor { display: none; flex-direction: column; gap: var(--cc-space-2); }
 .pm-editor[data-open="true"] { display: flex; }
-.pm-editor input[type="color"] {
+.pm-section-body input[type="color"] {
+  flex: 0 0 auto;
   width: 48px;
   height: var(--cc-h-input);
   padding: 0;
@@ -715,6 +716,64 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
             <span class="pm-slider-val" id="pm-dither-amt-val">100%</span>
           </div>
           <input type="range" class="pm-range" id="pm-dither-amt" min="0" max="100" step="1" value="100" aria-label="Dither strength">
+        </div>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-clean)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Clean up</span>
+        <span class="pm-section-note" id="pm-clean-note">Off</span>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Denoise</span>
+            <span class="pm-slider-val" id="pm-denoise-val">Off</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-denoise" min="0" max="3" step="1" value="0" aria-label="Pre-map denoise radius">
+        </div>
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Speck size</span>
+            <span class="pm-slider-val" id="pm-speck-val">Off</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-speck" min="0" max="128" step="1" value="0" aria-label="Maximum speck size to remove, in pixels">
+        </div>
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Tolerance</span>
+            <span class="pm-slider-val" id="pm-tolerance-val">50%</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-tolerance" min="0" max="100" step="1" value="50" aria-label="Near-miss colour tolerance">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-smooth-stipple"> Smooth stipple</label>
+      </div>
+    </section>
+
+    <section class="pm-section cc-card cc-tonal cc-clip-card" style="--cc-tone: var(--cc-segment)">
+      <div class="cc-card-header">
+        <span class="pm-section-title">Segment</span>
+        <span class="pm-section-note" id="pm-segment-note">Off</span>
+      </div>
+      <div class="pm-section-body">
+        <div>
+          <div class="pm-slider-head">
+            <span class="cc-label">Merge similar</span>
+            <span class="pm-slider-val" id="pm-merge-colors-val">Off</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-merge-colors" min="0" max="100" step="1" value="0" aria-label="Merge similar palette colours">
+        </div>
+        <label class="pm-check"><input type="checkbox" id="pm-outline"> Outline regions</label>
+        <div class="pm-row">
+          <input type="color" id="pm-outline-color" value="#000000" aria-label="Outline colour">
+          <div class="pm-grow">
+            <div class="pm-slider-head">
+              <span class="cc-label">Width</span>
+              <span class="pm-slider-val" id="pm-outline-width-val">1 px</span>
+            </div>
+            <input type="range" class="pm-range" id="pm-outline-width" min="1" max="4" step="1" value="1" aria-label="Outline width">
+          </div>
         </div>
       </div>
     </section>

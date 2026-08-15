@@ -120,6 +120,8 @@
   --cc-resize: 71, 82, 92;        /* pixelate / rescale                  */
   --cc-map: 103, 58, 183;         /* the nearest-colour mapping itself   */
   --cc-dither: 8, 112, 98;        /* error diffusion / ordered threshold */
+  --cc-clean: 40, 92, 88;         /* artifact removal / region absorption*/
+  --cc-segment: 74, 60, 140;      /* segmentation and boundary outlines  */
   --cc-export: 153, 30, 42;       /* download / clipboard                */
 
   /* Companion to the tones above. Category colours are deliberately the same

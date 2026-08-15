@@ -24,12 +24,16 @@ var EXTRACT_SAMPLES = 20000;
 var YIELD_MS = 14;         // work slice between event-loop yields
 var ALPHA_CUTOFF = 8;      // default alpha cut; user-adjustable at runtime
 
+var TRANSPARENT = 0xFFFF;  // index-map sentinel; palettes cap at 256 so it can't collide
+var TOLERANCE_MAX = 0.4;   // OKLab distance the tolerance slider maps onto at 100%
+
 var LS_PALETTES = 'pm.palettes.v1';
 var LS_SETTINGS = 'pm.settings.v1';
 var LS_CURRENT  = 'pm.current.v1';
 
 var state = {
   img: null,             // HTMLImageElement of the source
+  imgSerial: 0,          // bumped per load; keys the denoise cache
   name: 'image',         // source filename stem, used for export naming
   srcCanvas: null,       // full-resolution source, for eyedropper sampling
   srcCtx: null,
@@ -45,6 +49,7 @@ var state = {
   dispW: 0,
   dispH: 0,
   eyedropper: false,
+  outlineColorTouched: false,   // once true, the picker stops tracking the palette
   renderToken: 0,
   lastWork: null,        // { w, h } of the most recent processed buffer
   busy: false
@@ -556,6 +561,14 @@ function readOptions() {
     saturation: +els.saturation.value,
     gamma: +els.gamma.value / 100,
     alphaCut: +els.alphaCut.value,
+    denoise: +els.denoise.value,
+    speck: +els.speck.value,
+    tolerance: +els.tolerance.value / 100,
+    smoothStipple: els.smoothStipple.checked,
+    mergeColors: +els.mergeColors.value,
+    outline: els.outline.checked,
+    outlineColor: els.outlineColor.value,
+    outlineWidth: +els.outlineWidth.value,
     exportScale: +els.exportScale.value,
     exportFull: els.exportFull.checked,
     live: els.live.checked
@@ -620,11 +633,15 @@ function hasAdjustments(opts) {
 
 function nextTick() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
-/* Maps `imageData` in place against `matcher`. Returns the same ImageData, or
-   null if a newer render superseded this one mid-flight. */
+/* Maps `imageData` in place against `matcher`. Returns
+   `{ imageData, indices }` — the index map records which palette entry each
+   pixel resolved to, which the cleanup and segmentation passes work on rather
+   than re-deriving it from RGB. Returns null if a newer render superseded this
+   one mid-flight. */
 async function processBuffer(imageData, matcher, opts, token, onProgress) {
   var w = imageData.width, h = imageData.height, d = imageData.data;
   var pr = matcher.pr, pg = matcher.pg, pb = matcher.pb, nearest = matcher.nearest;
+  var indices = new Uint16Array(w * h);
 
   var adjust = hasAdjustments(opts);
   var tone = adjust ? buildToneLut(opts) : null;
@@ -668,6 +685,7 @@ async function processBuffer(imageData, matcher, opts, token, onProgress) {
 
       if (d[o + 3] < alphaCut) {
         d[o] = 0; d[o + 1] = 0; d[o + 2] = 0; d[o + 3] = 0;
+        indices[y * w + x] = TRANSPARENT;
         continue;
       }
       d[o + 3] = 255;
@@ -721,6 +739,7 @@ async function processBuffer(imageData, matcher, opts, token, onProgress) {
       }
 
       d[o] = nr; d[o + 1] = ng; d[o + 2] = nb;
+      indices[y * w + x] = idx;
     }
 
     if (mode === 'fs') {
@@ -737,12 +756,462 @@ async function processBuffer(imageData, matcher, opts, token, onProgress) {
   }
 
   if (onProgress) onProgress(1);
+  return token === state.renderToken ? { imageData: imageData, indices: indices } : null;
+}
+
+/* ---------------------------------------------------------------------------
+   6b. DENOISE — the pre-map half of artifact control
+   ---------------------------------------------------------------------------
+   Speckle in a mapped image usually is not a mapping bug: a compressed source
+   has ringing inside its flat fields, and a pixel that drifts far enough to
+   cross a palette decision boundary snaps to a different entry. Removing that
+   drift before matching is strictly better than repairing it afterwards.
+
+   A median rather than a blur, because this is cel art — a blur would soften
+   exactly the hard edges the style is made of, and would create new
+   intermediate colours along every one of them for the matcher to quantize.
+   ------------------------------------------------------------------------ */
+/* Partial sort to the k-th element (Hoare partition). Only the median is
+   needed, and fully sorting the window is where a large-radius median filter
+   spends most of its time — at radius 3 that is 49 samples per channel per
+   pixel, and sorting all of them made the pass several times slower than it
+   had to be. */
+function quickSelect(a, n, k) {
+  var lo = 0, hi = n - 1, pivot, i, j, t;
+  while (lo < hi) {
+    pivot = a[(lo + hi) >> 1]; i = lo; j = hi;
+    while (i <= j) {
+      while (a[i] < pivot) i++;
+      while (a[j] > pivot) j--;
+      if (i <= j) { t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; }
+    }
+    if (k <= j) hi = j;
+    else if (k >= i) lo = i;
+    else break;
+  }
+  return a[k];
+}
+
+async function denoiseBuffer(imageData, radius, token, onProgress) {
+  if (!radius) return imageData;
+  var w = imageData.width, h = imageData.height;
+  var src = new Uint8ClampedArray(imageData.data);   // read from a copy
+  var d = imageData.data;
+  var n = (2 * radius + 1) * (2 * radius + 1);
+  var wr = new Uint8Array(n), wg = new Uint8Array(n), wb = new Uint8Array(n);
+  var mid = n >> 1;
+  var t0 = performance.now();
+  var y, x, dy, dx, yy, xx, o, c, i, j, v;
+
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      o = (y * w + x) * 4;
+      if (src[o + 3] === 0) { d[o] = 0; d[o+1] = 0; d[o+2] = 0; d[o+3] = 0; continue; }
+      /* Clamp the window to the image once per pixel rather than testing every
+         sample. At radius 3 that removes 49 pairs of bounds checks from the
+         hot loop, which is where this pass actually spends its time. */
+      c = 0;
+      var y0 = y - radius, y1 = y + radius, x0 = x - radius, x1 = x + radius;
+      if (y0 < 0) y0 = 0;
+      if (y1 > h - 1) y1 = h - 1;
+      if (x0 < 0) x0 = 0;
+      if (x1 > w - 1) x1 = w - 1;
+      for (yy = y0; yy <= y1; yy++) {
+        var row = yy * w;
+        for (xx = x0; xx <= x1; xx++) {
+          var so = (row + xx) * 4;
+          if (src[so + 3] === 0) continue;   // transparent neighbours don't vote
+          wr[c] = src[so]; wg[c] = src[so + 1]; wb[c] = src[so + 2];
+          c++;
+        }
+      }
+      if (!c) continue;
+      mid = c >> 1;
+      d[o] = quickSelect(wr, c, mid);
+      d[o + 1] = quickSelect(wg, c, mid);
+      d[o + 2] = quickSelect(wb, c, mid);
+    }
+
+    if (performance.now() - t0 > YIELD_MS) {
+      if (token !== state.renderToken) return null;
+      if (onProgress) onProgress((y + 1) / h);
+      await nextTick();
+      t0 = performance.now();
+    }
+  }
+  return imageData;
+}
+
+/* ---------------------------------------------------------------------------
+   6c. CLEANUP, SEGMENTATION AND OUTLINES
+   ---------------------------------------------------------------------------
+   All three are driven by one idea: label the connected regions of equal
+   palette index. Regions below a size threshold are artifacts to absorb;
+   the regions themselves are the segmentation; and the boundaries between
+   them are where outlines go.
+   ------------------------------------------------------------------------ */
+
+function postActive(opts) {
+  return opts.denoise > 0 || opts.speck > 0 || opts.smoothStipple ||
+         opts.mergeColors > 0 || opts.outline;
+}
+function regionsNeeded(opts) {
+  return opts.speck > 0 || opts.outline;
+}
+
+/* Squared OKLab distance between two palette entries. The tolerance gate asks
+   "are these two colours near-misses of each other", which is a question about
+   the palette, not about the original pixel — so no per-pixel buffer is needed
+   to answer it. */
+function buildPaletteDistances(matcher) {
+  var n = matcher.n, lab = new Float32Array(n * 3), tmp = [0, 0, 0], i;
+  for (i = 0; i < n; i++) {
+    rgbToOklab(matcher.pr[i], matcher.pg[i], matcher.pb[i], tmp);
+    lab[i * 3] = tmp[0]; lab[i * 3 + 1] = tmp[1]; lab[i * 3 + 2] = tmp[2];
+  }
+  return function (a, b) {
+    var d0 = lab[a * 3] - lab[b * 3];
+    var d1 = lab[a * 3 + 1] - lab[b * 3 + 1];
+    var d2 = lab[a * 3 + 2] - lab[b * 3 + 2];
+    return Math.sqrt(d0 * d0 + d1 * d1 + d2 * d2);
+  };
+}
+
+/* Merge palette entries that sit within `threshold` of each other, then remap
+   every pixel onto its cluster representative.
+
+   Doing this at the palette level rather than over a region adjacency graph is
+   the whole trick: it is O(n^2) on at most 256 colours instead of O(regions^2)
+   on potentially hundreds of thousands, and the output is still built only
+   from palette entries. */
+function mergeSimilarColors(indices, matcher, threshold, dist) {
+  var n = matcher.n, parent = new Int32Array(n), i, j;
+  for (i = 0; i < n; i++) parent[i] = i;
+  function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+
+  for (i = 0; i < n; i++) {
+    for (j = i + 1; j < n; j++) {
+      if (dist(i, j) <= threshold) {
+        var ra = find(i), rb = find(j);
+        if (ra !== rb) parent[ra > rb ? ra : rb] = ra < rb ? ra : rb;
+      }
+    }
+  }
+
+  var remap = new Uint16Array(n), changed = false;
+  for (i = 0; i < n; i++) { remap[i] = find(i); if (remap[i] !== i) changed = true; }
+  if (!changed) return false;
+
+  for (i = 0; i < indices.length; i++) {
+    if (indices[i] !== TRANSPARENT) indices[i] = remap[indices[i]];
+  }
+  return true;
+}
+
+/* One modal-filter iteration. Isolated specks are handled by the region pass,
+   but antialiased edges produce long connected 1px chains that no area
+   threshold can catch — this is what thins those. */
+function smoothStipple(indices, w, h, dist, tolerance) {
+  var src = new Uint16Array(indices);
+  var counts = {}, x, y, i, dy, dx, yy, xx, v, best, bestCount, k;
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      i = y * w + x;
+      var self = src[i];
+      if (self === TRANSPARENT) continue;
+      counts = {};
+      best = -1; bestCount = 0;
+      for (dy = -1; dy <= 1; dy++) {
+        yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          xx = x + dx; if (xx < 0 || xx >= w) continue;
+          v = src[yy * w + xx];
+          if (v === TRANSPARENT) continue;
+          k = counts[v] = (counts[v] || 0) + 1;
+          if (k > bestCount) { bestCount = k; best = v; }
+        }
+      }
+      // Needs a real majority of the 8-neighbourhood, and a near-miss colour.
+      if (best >= 0 && best !== self && bestCount >= 5 && dist(self, best) <= tolerance) {
+        indices[i] = best;
+      }
+    }
+  }
+}
+
+/* 4-connected component labelling over the index map, with an explicit stack —
+   a flat sky in a large image is a single region of millions of pixels, which
+   would blow the call stack if this recursed.
+
+   4- rather than 8-connectivity is deliberate: under 8-connectivity a diagonal
+   pair of specks touches the surrounding field and can never be isolated as a
+   small region. */
+function labelRegions(indices, w, h) {
+  var labels = new Int32Array(w * h).fill(-1);
+  var stack = new Int32Array(w * h);
+  var areas = [], regionIndex = [];
+  var next = 0, i, sp, p, px, py, self;
+
+  for (i = 0; i < w * h; i++) {
+    if (labels[i] >= 0 || indices[i] === TRANSPARENT) continue;
+    self = indices[i];
+    var label = next++;
+    var area = 0;
+    sp = 0;
+    stack[sp++] = i;
+    labels[i] = label;
+    while (sp > 0) {
+      p = stack[--sp];
+      area++;
+      px = p % w; py = (p / w) | 0;
+      if (px > 0     && labels[p - 1] < 0 && indices[p - 1] === self) { labels[p - 1] = label; stack[sp++] = p - 1; }
+      if (px < w - 1 && labels[p + 1] < 0 && indices[p + 1] === self) { labels[p + 1] = label; stack[sp++] = p + 1; }
+      if (py > 0     && labels[p - w] < 0 && indices[p - w] === self) { labels[p - w] = label; stack[sp++] = p - w; }
+      if (py < h - 1 && labels[p + w] < 0 && indices[p + w] === self) { labels[p + w] = label; stack[sp++] = p + w; }
+    }
+    areas.push(area);
+    regionIndex.push(self);
+  }
+  return { labels: labels, areas: areas, regionIndex: regionIndex, count: next };
+}
+
+/* Absorb every region at or below `maxArea` into the adjacent region it shares
+   the most boundary with — provided the two colours are within tolerance.
+
+   That gate is what separates an artifact from a detail. A slightly-off orange
+   speck sitting in a field of orange is a near-miss and gets absorbed; a
+   genuine black pupil of the same size on the same field is nowhere near it in
+   OKLab and survives at any speck size. */
+function absorbSmallRegions(indices, labels, regions, w, h, maxArea, tolerance, dist) {
+  var count = regions.count, areas = regions.areas, regionIndex = regions.regionIndex;
+  var parent = new Int32Array(count), i;
+  for (i = 0; i < count; i++) parent[i] = i;
+  function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+
+  // Gather the pixels of small regions only, grouped by label via counting sort.
+  var small = [];
+  for (i = 0; i < count; i++) if (areas[i] <= maxArea) small.push(i);
+  if (!small.length) return 0;
+
+  var isSmall = new Uint8Array(count);
+  var slot = new Int32Array(count).fill(-1);
+  for (i = 0; i < small.length; i++) { isSmall[small[i]] = 1; slot[small[i]] = i; }
+
+  var offsets = new Int32Array(small.length + 1);
+  for (i = 0; i < w * h; i++) {
+    var l = labels[i];
+    if (l >= 0 && isSmall[l]) offsets[slot[l] + 1]++;
+  }
+  for (i = 0; i < small.length; i++) offsets[i + 1] += offsets[i];
+  var cursor = new Int32Array(offsets.subarray(0, small.length));
+  var pixels = new Int32Array(offsets[small.length]);
+  for (i = 0; i < w * h; i++) {
+    var l2 = labels[i];
+    if (l2 >= 0 && isSmall[l2]) pixels[cursor[slot[l2]]++] = i;
+  }
+
+  // Smallest first, so a speck touching another speck resolves in the right order.
+  small.sort(function (a, b) { return areas[a] - areas[b]; });
+
+  var absorbed = 0;
+  for (var s = 0; s < small.length; s++) {
+    var label = small[s];
+    if (find(label) !== label) continue;   // already absorbed into something else
+    // Absorbing grows the target; once it is no longer small, leave it alone.
+    if (areas[label] > maxArea) continue;
+
+    var start = offsets[slot[label]], end = offsets[slot[label] + 1];
+    var tally = {}, bestLabel = -1, bestShared = 0;
+
+    for (i = start; i < end; i++) {
+      var p = pixels[i];
+      var px = p % w, py = (p / w) | 0;
+      var nb0 = px > 0 ? p - 1 : -1, nb1 = px < w - 1 ? p + 1 : -1;
+      var nb2 = py > 0 ? p - w : -1, nb3 = py < h - 1 ? p + w : -1;
+      for (var k = 0; k < 4; k++) {
+        var np = k === 0 ? nb0 : k === 1 ? nb1 : k === 2 ? nb2 : nb3;
+        if (np < 0) continue;
+        var nl = labels[np];
+        if (nl < 0) continue;                      // transparent
+        nl = find(nl);
+        if (nl === label) continue;
+        var t = tally[nl] = (tally[nl] || 0) + 1;
+        if (t > bestShared) { bestShared = t; bestLabel = nl; }
+      }
+    }
+
+    if (bestLabel < 0) continue;
+    if (dist(regionIndex[label], regionIndex[bestLabel]) > tolerance) continue;
+
+    /* Only the union-find is updated here, not the pixels. A target can itself
+       be absorbed later in the pass, and rewriting eagerly would strand the
+       pixels this region just donated — they are not in the target's pixel
+       list. One resolution pass at the end follows every chain to its root. */
+    parent[label] = bestLabel;
+    areas[bestLabel] += areas[label];
+    absorbed++;
+  }
+
+  if (absorbed) {
+    for (i = 0; i < w * h; i++) {
+      var l3 = labels[i];
+      if (l3 < 0) continue;
+      var root = find(l3);
+      if (root === l3) continue;
+      labels[i] = root;
+      indices[i] = regionIndex[root];
+    }
+  }
+  return absorbed;
+}
+
+/* Paint region boundaries. Edges are found on the final label map, so they
+   follow the cleaned-up, merged regions rather than raw mapping noise.
+
+   Boundaries against transparency count, but paint only ever lands on the
+   opaque side — a cut-out gets a clean edge instead of a halo. */
+function drawOutlines(imageData, labels, w, h, colorHex, width) {
+  var rgb = hexToRgb(colorHex) || [0, 0, 0];
+  var edge = new Uint8Array(w * h);
+  var x, y, i;
+
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      i = y * w + x;
+      if (labels[i] < 0) continue;                  // never paint transparent pixels
+      if ((x < w - 1 && labels[i + 1] !== labels[i]) ||
+          (y < h - 1 && labels[i + w] !== labels[i])) {
+        edge[i] = 1;
+      } else if ((x > 0 && labels[i - 1] < 0) || (y > 0 && labels[i - w] < 0) ||
+                 (x < w - 1 && labels[i + 1] < 0) || (y < h - 1 && labels[i + w] < 0)) {
+        edge[i] = 1;                                // border with transparency
+      }
+    }
+  }
+
+  // Widen by dilating, again never crossing into transparent pixels.
+  for (var pass = 1; pass < width; pass++) {
+    var grown = new Uint8Array(edge);
+    for (y = 0; y < h; y++) {
+      for (x = 0; x < w; x++) {
+        i = y * w + x;
+        if (edge[i] || labels[i] < 0) continue;
+        if ((x > 0 && edge[i - 1]) || (x < w - 1 && edge[i + 1]) ||
+            (y > 0 && edge[i - w]) || (y < h - 1 && edge[i + w])) grown[i] = 1;
+      }
+    }
+    edge = grown;
+  }
+
+  var d = imageData.data;
+  for (i = 0; i < w * h; i++) {
+    if (!edge[i]) continue;
+    var o = i * 4;
+    d[o] = rgb[0]; d[o + 1] = rgb[1]; d[o + 2] = rgb[2]; d[o + 3] = 255;
+  }
+}
+
+function writeIndices(imageData, indices, matcher) {
+  var d = imageData.data, pr = matcher.pr, pg = matcher.pg, pb = matcher.pb;
+  for (var i = 0; i < indices.length; i++) {
+    var o = i * 4, idx = indices[i];
+    if (idx === TRANSPARENT) { d[o] = 0; d[o+1] = 0; d[o+2] = 0; d[o+3] = 0; continue; }
+    d[o] = pr[idx]; d[o + 1] = pg[idx]; d[o + 2] = pb[idx]; d[o + 3] = 255;
+  }
+}
+
+/* Runs everything after mapping. Returns the ImageData, or null if superseded. */
+async function postProcess(imageData, indices, matcher, opts, token, onProgress) {
+  if (!opts.speck && !opts.smoothStipple && !opts.mergeColors && !opts.outline) return imageData;
+
+  var w = imageData.width, h = imageData.height;
+  var dist = buildPaletteDistances(matcher);
+  var tolerance = opts.tolerance * TOLERANCE_MAX;
+
+  /* Each stage here is a single synchronous sweep, so yielding between them
+     unconditionally would cost a clamped macrotask apiece — real money on a
+     preview that finishes in single-digit milliseconds. Yield only once enough
+     work has actually accumulated to be worth handing the UI a frame. */
+  var mark = performance.now();
+  async function breathe(p) {
+    if (token !== state.renderToken) return false;
+    if (onProgress) onProgress(p);
+    if (performance.now() - mark > YIELD_MS) {
+      await nextTick();
+      mark = performance.now();
+    }
+    return token === state.renderToken;
+  }
+
+  if (opts.smoothStipple) smoothStipple(indices, w, h, dist, tolerance);
+  if (!await breathe(0.3)) return null;
+
+  if (opts.mergeColors > 0) mergeSimilarColors(indices, matcher, opts.mergeColors / 100 * TOLERANCE_MAX, dist);
+  if (!await breathe(0.45)) return null;
+
+  var regions = null;
+  if (regionsNeeded(opts)) {
+    regions = labelRegions(indices, w, h);
+    if (!await breathe(0.7)) return null;
+
+    if (opts.speck > 0) {
+      absorbSmallRegions(indices, regions.labels, regions, w, h, opts.speck, tolerance, dist);
+      if (!await breathe(0.85)) return null;
+    }
+  }
+
+  writeIndices(imageData, indices, matcher);
+
+  if (opts.outline && regions) {
+    drawOutlines(imageData, regions.labels, w, h, opts.outlineColor, opts.outlineWidth);
+  }
+
+  if (onProgress) onProgress(1);
   return token === state.renderToken ? imageData : null;
 }
 
 /* ---------------------------------------------------------------------------
    7. RENDERING TO SCREEN
    ------------------------------------------------------------------------ */
+
+/* Denoise -> map -> clean up / segment / outline. Shared by the preview and
+   the full-resolution render so the two can never drift apart. Returns the
+   finished ImageData, or null if a newer render superseded this one.
+
+   Progress is split across the three stages by rough cost so the bar advances
+   smoothly rather than sitting still through the expensive one. */
+var denoiseCache = null;
+
+async function runPipeline(dims, matcher, opts, token) {
+  var span = function (from, to) {
+    return function (p) { setProgress(from + (to - from) * p); };
+  };
+
+  var imageData = drawWork(dims, opts.smooth);
+
+  if (opts.denoise > 0) {
+    /* Denoising depends only on the source, the working size and the radius —
+       never on the palette, metric, dither or any cleanup setting. Caching it
+       keeps dragging those sliders interactive even at a radius that takes
+       seconds to compute, which is otherwise the one setting that makes the
+       tool feel broken. */
+    var key = [state.imgSerial, dims.w, dims.h, opts.smooth ? 1 : 0, opts.denoise].join(':');
+    if (denoiseCache && denoiseCache.key === key) {
+      imageData.data.set(denoiseCache.data);
+    } else {
+      imageData = await denoiseBuffer(imageData, opts.denoise, token, span(0, 0.35));
+      if (!imageData) return null;
+      denoiseCache = { key: key, data: new Uint8ClampedArray(imageData.data) };
+    }
+  }
+
+  var mapped = await processBuffer(imageData, matcher, opts, token,
+    span(opts.denoise > 0 ? 0.35 : 0, postActive(opts) ? 0.8 : 1));
+  if (!mapped) return null;
+
+  return await postProcess(mapped.imageData, mapped.indices, matcher, opts, token, span(0.8, 1));
+}
 
 var renderTimer = null;
 
@@ -769,8 +1238,7 @@ async function renderPreview() {
 
   setBusy(true);
   var started = performance.now();
-  var imageData = drawWork(dims, opts.smooth);
-  var out = await processBuffer(imageData, matcher, opts, token, setProgress);
+  var out = await runPipeline(dims, matcher, opts, token);
   if (!out) { return; }   // superseded — a newer render owns the canvas now
 
   els.canvasResult.width = dims.w;
@@ -793,8 +1261,7 @@ async function renderFull(opts) {
   var matcher = buildMatcher(state.palette.colors, opts.metric);
   setBusy(true);
   setStatus('Rendering ' + dims.w + '×' + dims.h + '…');
-  var imageData = drawWork(dims, opts.smooth);
-  var out = await processBuffer(imageData, matcher, opts, token, setProgress);
+  var out = await runPipeline(dims, matcher, opts, token);
   setBusy(false);
   setProgress(0);
   if (!out) return null;
@@ -891,6 +1358,8 @@ function loadImageFromUrl(url, name) {
   img.onerror = function () { toast('Could not decode that image.', true); };
   img.onload = function () {
     state.img = img;
+    state.imgSerial++;
+    denoiseCache = null;
     state.name = (name || 'image').replace(/\.[^.]+$/, '') || 'image';
     state.srcW = img.naturalWidth;
     state.srcH = img.naturalHeight;
@@ -961,6 +1430,9 @@ function renderSwatches() {
   els.swatchCount.textContent = state.palette.colors.length + ' colour' +
     (state.palette.colors.length === 1 ? '' : 's');
 
+  // The off-palette outline notice depends on the palette, so refresh it here.
+  updateStageNotes();
+
   var open = state.selected >= 0 && state.selected < state.palette.colors.length;
   els.editor.dataset.open = open ? 'true' : 'false';
   if (open) {
@@ -1019,6 +1491,19 @@ function renderLibrary() {
   els.libCount.textContent = state.library.length + ' saved';
 }
 
+/* Until the user picks their own, the outline colour follows the palette's
+   darkest entry — which is what an outline usually wants to be, and keeps the
+   default case from introducing an off-palette colour. */
+function syncOutlineColor() {
+  if (state.outlineColorTouched || !state.palette.colors.length) return;
+  var darkest = state.palette.colors[0], best = Infinity, i, l;
+  for (i = 0; i < state.palette.colors.length; i++) {
+    l = oklabLightness(state.palette.colors[i]);
+    if (l < best) { best = l; darkest = state.palette.colors[i]; }
+  }
+  els.outlineColor.value = darkest;
+}
+
 function setPalette(colors, name, id) {
   state.palette.colors = dedupe(colors).slice(0, MAX_COLORS);
   if (name != null) {
@@ -1027,6 +1512,7 @@ function setPalette(colors, name, id) {
   }
   state.activeId = id || null;
   state.selected = -1;
+  syncOutlineColor();
   renderSwatches();
   renderLibrary();
   saveCurrent();
@@ -1086,6 +1572,15 @@ function saveSettings() {
     pixel: els.pixel.value,
     smooth: els.smooth.checked,
     alphaCut: els.alphaCut.value,
+    denoise: els.denoise.value,
+    speck: els.speck.value,
+    tolerance: els.tolerance.value,
+    smoothStipple: els.smoothStipple.checked,
+    mergeColors: els.mergeColors.value,
+    outline: els.outline.checked,
+    outlineColor: els.outlineColor.value,
+    outlineWidth: els.outlineWidth.value,
+    outlineColorTouched: state.outlineColorTouched,
     brightness: els.brightness.value,
     contrast: els.contrast.value,
     saturation: els.saturation.value,
@@ -1109,6 +1604,15 @@ function loadSettings() {
   if (s.pixel != null) els.pixel.value = s.pixel;
   if (s.smooth != null) els.smooth.checked = !!s.smooth;
   if (s.alphaCut != null) els.alphaCut.value = s.alphaCut;
+  if (s.denoise != null) els.denoise.value = s.denoise;
+  if (s.speck != null) els.speck.value = s.speck;
+  if (s.tolerance != null) els.tolerance.value = s.tolerance;
+  if (s.smoothStipple != null) els.smoothStipple.checked = !!s.smoothStipple;
+  if (s.mergeColors != null) els.mergeColors.value = s.mergeColors;
+  if (s.outline != null) els.outline.checked = !!s.outline;
+  if (s.outlineColor) els.outlineColor.value = s.outlineColor;
+  if (s.outlineWidth != null) els.outlineWidth.value = s.outlineWidth;
+  state.outlineColorTouched = !!s.outlineColorTouched;
   if (s.brightness != null) els.brightness.value = s.brightness;
   if (s.contrast != null) els.contrast.value = s.contrast;
   if (s.saturation != null) els.saturation.value = s.saturation;
@@ -1246,6 +1750,39 @@ function syncSliderLabels() {
   els.exportScaleVal.textContent = els.exportScale.value + '×';
   els.extractNVal.textContent = els.extractN.value;
   els.alphaCutVal.textContent = els.alphaCut.value;
+
+  var dn = +els.denoise.value;
+  els.denoiseVal.textContent = dn ? (dn * 2 + 1) + '×' + (dn * 2 + 1) : 'Off';
+  els.speckVal.textContent = +els.speck.value ? els.speck.value + ' px' : 'Off';
+  els.toleranceVal.textContent = els.tolerance.value + '%';
+  els.mergeColorsVal.textContent = +els.mergeColors.value ? els.mergeColors.value : 'Off';
+  /* Each step past the first dilates the edge outward on both sides, so the
+     painted band is 2n-1 wide. Report the width actually drawn. */
+  els.outlineWidthVal.textContent = (+els.outlineWidth.value * 2 - 1) + ' px';
+  updateStageNotes();
+}
+
+/* The two new cards summarise themselves in their header, so their state is
+   readable when the rail is scrolled past them. */
+function updateStageNotes() {
+  var parts = [];
+  if (+els.denoise.value) parts.push('denoise ' + els.denoise.value);
+  if (+els.speck.value) parts.push('≤' + els.speck.value + 'px');
+  if (els.smoothStipple.checked) parts.push('stipple');
+  els.cleanNote.textContent = parts.length ? parts.join(' · ') : 'Off';
+
+  var seg = [];
+  if (+els.mergeColors.value) seg.push('merge ' + els.mergeColors.value);
+  if (els.outline.checked) {
+    seg.push('outline ' + (+els.outlineWidth.value * 2 - 1) + 'px');
+    /* Outlines take a free colour, so they are the one thing that can put a
+       colour in the output that is not in the palette. Say so rather than let
+       the tool's central claim quietly stop being true. */
+    if (state.palette.colors.indexOf(normalizeHex(els.outlineColor.value)) < 0) {
+      seg.push('+1 off-palette');
+    }
+  }
+  els.segmentNote.textContent = seg.length ? seg.join(' · ') : 'Off';
 }
 
 var ZOOM_STEPS = [0.125, 0.25, 0.5, 0.75, 1, 2, 4, 8, 16];
@@ -1278,6 +1815,9 @@ function cacheEls() {
     'swatches', 'editor', 'palName', 'swatchCount', 'lib', 'libCount',
     'preset', 'importText',
     'metric', 'dither', 'ditherAmt', 'pixel', 'smooth', 'live', 'alphaCut',
+    'denoise', 'speck', 'tolerance', 'smoothStipple',
+    'mergeColors', 'outline', 'outlineColor', 'outlineWidth',
+    'cleanNote', 'segmentNote',
     'brightness', 'contrast', 'saturation', 'gamma',
     'exportScale', 'exportFull', 'time', 'workDims', 'exportDims',
     'viewport', 'drop', 'splitHandle', 'zoomVal',
@@ -1311,6 +1851,11 @@ function cacheEls() {
   els.exportScaleVal = $('pm-export-scale-val');
   els.extractNVal = $('pm-extract-n-val');
   els.alphaCutVal = $('pm-alpha-cut-val');
+  els.denoiseVal = $('pm-denoise-val');
+  els.speckVal = $('pm-speck-val');
+  els.toleranceVal = $('pm-tolerance-val');
+  els.mergeColorsVal = $('pm-merge-colors-val');
+  els.outlineWidthVal = $('pm-outline-width-val');
   els.palFile = $('pm-pal-file');
 }
 
@@ -1664,7 +2209,9 @@ function wireControls() {
 
   // Anything that changes the mapping re-renders; anything cosmetic doesn't.
   [els.metric, els.dither, els.pixel, els.smooth, els.alphaCut,
-   els.brightness, els.contrast, els.saturation, els.gamma, els.ditherAmt].forEach(function (el) {
+   els.brightness, els.contrast, els.saturation, els.gamma, els.ditherAmt,
+   els.denoise, els.speck, els.tolerance, els.smoothStipple,
+   els.mergeColors, els.outline, els.outlineWidth].forEach(function (el) {
     el.addEventListener('input', function () {
       syncSliderLabels();
       updateFooter();
@@ -1682,6 +2229,14 @@ function wireControls() {
   });
 
   els.extractN.addEventListener('input', function () { syncSliderLabels(); saveSettings(); });
+
+  /* Touching the picker opts out of tracking the palette's darkest entry. */
+  els.outlineColor.addEventListener('input', function () {
+    state.outlineColorTouched = true;
+    updateStageNotes();
+    saveSettings();
+    scheduleRender();
+  });
 
   els.live.addEventListener('change', function () {
     saveSettings();
@@ -1751,6 +2306,7 @@ function init() {
     els.palName.value = state.palette.name;
   }
 
+  syncOutlineColor();
   renderSwatches();
   renderLibrary();
   syncSliderLabels();
@@ -1773,7 +2329,10 @@ function init() {
     readOptions: readOptions,
     parsePaletteText: parsePaletteText,
     buildMatcher: buildMatcher,
-    extractPalette: extractPalette
+    extractPalette: extractPalette,
+    labelRegions: labelRegions,
+    denoiseBuffer: denoiseBuffer,
+    syncOutlineColor: syncOutlineColor
   };
 }
 
