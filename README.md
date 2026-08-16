@@ -222,6 +222,10 @@ card — it's recognised as a backup rather than scraped for hex codes.
   <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> before/split/after, arrows nudge the split divider.
 - **Fold a card** — click any card's header to collapse it to its title band, click again to open
   it. Keeps the rails down to the handful of controls you actually use.
+- **Fold part of a card** — a few cards carry a second job inside them, under their own thin
+  sub-header: *Backup* in Presets, *Method and harmony* in Sample from image, *Bring colours in*
+  and *Send this palette out* in Library, and *Outline* in Segment. Those fold on their own, so you
+  can keep a card open and still put the half you're not using away.
 - **Move a card** — drag a card by its header to reorder it, either within its own rail or across
   to the other one, so the tools you reach for most sit where you want them. On a touch screen drag
   by the grip (⠿) at the right of the header — a finger anywhere else on the header still scrolls

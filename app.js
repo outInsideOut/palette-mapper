@@ -2343,18 +2343,41 @@ function cardTitle(section) {
   return t ? t.textContent : 'Card';
 }
 
-/* --- Folding ------------------------------------------------------------ */
+/* --- Folding -------------------------------------------------------------
+   Two levels fold on one mechanism: whole cards, and the sub-sections inside
+   the few cards that carry a second job (Library's import and export halves,
+   Segment's outline block). A sub-section is just another element with an id
+   and a collapsed flag, so the only thing that differs is which button
+   carries the state — and both ids share one list in storage, since they are
+   ids of things that are collapsed and nothing else about them matters.
+   ------------------------------------------------------------------------ */
 
-function setFold(section, collapsed) {
-  section.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
-  var btn = section.querySelector('.pm-fold');
+function foldables() {
+  return [].slice.call(document.querySelectorAll('.pm-section[data-card], .pm-group[data-group]'));
+}
+
+function foldId(el) {
+  return el.getAttribute('data-card') || el.getAttribute('data-group');
+}
+
+/* Each card has exactly one .pm-fold (in its header) and each group exactly
+   one .pm-subfold, so neither lookup can reach into the other's territory. */
+function foldButton(el) {
+  return el.classList.contains('pm-group')
+    ? el.querySelector('.pm-subfold')
+    : el.querySelector('.pm-fold');
+}
+
+function setFold(el, collapsed) {
+  el.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+  var btn = foldButton(el);
   if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 function saveFolds() {
-  lsSet(LS_FOLDS, cardSections()
-    .filter(function (s) { return s.getAttribute('data-collapsed') === 'true'; })
-    .map(cardId));
+  lsSet(LS_FOLDS, foldables()
+    .filter(function (el) { return el.getAttribute('data-collapsed') === 'true'; })
+    .map(foldId));
 }
 
 /* --- Order -------------------------------------------------------------- */
@@ -2507,18 +2530,23 @@ function wireCards() {
   var stored = lsGet(LS_FOLDS);
   if (!Array.isArray(stored)) stored = [];
 
-  cardSections().forEach(function (section) {
-    setFold(section, stored.indexOf(cardId(section)) !== -1);
+  /* Cards and sub-sections share the fold wiring; only cards go on to get the
+     drag and the Alt+Arrow keys. */
+  foldables().forEach(function (el) {
+    setFold(el, stored.indexOf(foldId(el)) !== -1);
+    var btn = foldButton(el);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      if (justDragged) return;
+      setFold(el, el.getAttribute('data-collapsed') !== 'true');
+      saveFolds();
+    });
+  });
 
+  cardSections().forEach(function (section) {
     var header = section.querySelector('.cc-card-header');
     var btn = section.querySelector('.pm-fold');
     if (!header || !btn) return;
-
-    btn.addEventListener('click', function () {
-      if (justDragged) return;
-      setFold(section, section.getAttribute('data-collapsed') !== 'true');
-      saveFolds();
-    });
 
     btn.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     btn.title = 'Click to fold — drag, or Alt+↑/↓, to move this card';

@@ -152,8 +152,48 @@ body.cc-app {
   line-height: 1;
   transition: transform 0.12s var(--cc-ease);
 }
-.pm-section[data-collapsed="true"] .pm-fold-caret { transform: rotate(-90deg); }
+/* Scoped to the card's own header: a card carrying folded sub-sections must
+   not have their carets turned too. */
+.pm-section[data-collapsed="true"] > .cc-card-header .pm-fold-caret { transform: rotate(-90deg); }
 .pm-section[data-collapsed="true"] > .pm-section-body { display: none; }
+
+/* --- Sub-sections --------------------------------------------------------
+   A few cards carry a whole second job inside them — the outline controls
+   under Segment, the import and export halves of the Library. Those get a
+   sub-header that folds on the same machinery as the card, one weight
+   quieter: a hairline and a label rather than a filled band, so the card
+   header stays the loudest thing in the card. */
+.pm-group,
+.pm-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cc-space-2);
+}
+.pm-subfold {
+  display: flex;
+  align-items: center;
+  gap: var(--cc-space-2);
+  width: 100%;
+  margin: 0;
+  padding: var(--cc-space-1) 0;
+  background: none;
+  border: 0;
+  border-top: var(--cc-border-w) solid var(--cc-hairline);
+  color: rgb(var(--cc-text));
+  font-family: var(--cc-font-heading);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--cc-track-label);
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.pm-subfold:hover { color: rgb(var(--cc-accent)); }
+.pm-subfold:focus-visible { outline: 2px solid rgb(var(--cc-accent)); outline-offset: -2px; }
+/* Directly under the card's tone band the rule is one line too many. */
+.pm-section-body > .pm-group:first-child > .pm-subfold { border-top: 0; }
+.pm-group[data-collapsed="true"] > .pm-subfold .pm-fold-caret { transform: rotate(-90deg); }
+.pm-group[data-collapsed="true"] > .pm-group-body { display: none; }
 
 /* --- Reordering ----------------------------------------------------------
    Cards are dragged by their header. Touch is the awkward case: a finger on a
@@ -699,6 +739,7 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
   /* On touch the grip is the only way to reorder a card, so it cannot be a
      16px target. Wider and more visible, without touching the band's height. */
   .pm-grip { padding: 0 var(--cc-space-3); font-size: 15px; opacity: 0.7; }
+  .pm-subfold { min-height: 40px; }
 
   /* A 14px-tall track with an 8px thumb is not a touch control. */
   .pm-range { height: 44px; }
@@ -792,15 +833,24 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
         </div>
         <!-- Presets and the palette library live in localStorage, which a cache
              clear or a new machine takes with it. These two are the way out and
-             back in, and they carry both — half a backup is worse than none. -->
-        <div class="pm-btn-row">
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-export"
-                  title="Save your presets and your saved palettes to a .json file">Export .json</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-import"
-                  title="Load a .json backup — entries with the same name are updated, the rest are added">Import .json</button>
-          <input type="file" id="pm-setup-file" accept=".json,application/json" class="cc-visually-hidden">
+             back in, and they carry both — half a backup is worse than none.
+             Folded away under their own header because this is a thing you do
+             twice a year, not twice an hour. -->
+        <div class="pm-group" data-group="presets-backup">
+          <button type="button" class="pm-subfold" aria-expanded="true" aria-controls="pm-group-presets-backup">
+            <span class="pm-fold-caret" aria-hidden="true">▾</span>Backup
+          </button>
+          <div class="pm-group-body" id="pm-group-presets-backup">
+            <div class="pm-btn-row">
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-export"
+                      title="Save your presets and your saved palettes to a .json file">Export .json</button>
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-setup-import"
+                      title="Load a .json backup — entries with the same name are updated, the rest are added">Import .json</button>
+              <input type="file" id="pm-setup-file" accept=".json,application/json" class="cc-visually-hidden">
+            </div>
+            <span class="cc-label">Presets and saved palettes, as a file</span>
+          </div>
         </div>
-        <span class="cc-label">Backup: presets and saved palettes</span>
       </div>
     </section>
 
@@ -861,29 +911,38 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
           <input type="range" class="pm-range" id="pm-extract-n" min="2" max="64" step="1" value="16" aria-label="Number of colours to extract">
         </div>
 
-        <label class="cc-label" for="pm-extract-method">Method</label>
-        <select class="pm-select" id="pm-extract-method">
-          <option value="cluster">Perceptual — sample the image</option>
-          <option value="theory">Colour theory — build ramps</option>
-        </select>
+        <!-- How the extraction works, as opposed to what you press: set once
+             for a piece of work, then usually left alone. -->
+        <div class="pm-group" data-group="sample-method">
+          <button type="button" class="pm-subfold" aria-expanded="true" aria-controls="pm-group-sample-method">
+            <span class="pm-fold-caret" aria-hidden="true">▾</span>Method and harmony
+          </button>
+          <div class="pm-group-body" id="pm-group-sample-method">
+            <label class="cc-label" for="pm-extract-method">Method</label>
+            <select class="pm-select" id="pm-extract-method">
+              <option value="cluster">Perceptual — sample the image</option>
+              <option value="theory">Colour theory — build ramps</option>
+            </select>
 
-        <label class="cc-label" for="pm-extract-scheme">Harmony</label>
-        <select class="pm-select" id="pm-extract-scheme" disabled>
-          <option value="auto">Auto — the image's own hues</option>
-          <option value="complementary">Complementary</option>
-          <option value="split">Split complementary</option>
-          <option value="triadic">Triadic</option>
-          <option value="tetradic">Tetradic</option>
-          <option value="analogous">Analogous</option>
-          <option value="monochrome">Monochrome</option>
-        </select>
+            <label class="cc-label" for="pm-extract-scheme">Harmony</label>
+            <select class="pm-select" id="pm-extract-scheme" disabled>
+              <option value="auto">Auto — the image's own hues</option>
+              <option value="complementary">Complementary</option>
+              <option value="split">Split complementary</option>
+              <option value="triadic">Triadic</option>
+              <option value="tetradic">Tetradic</option>
+              <option value="analogous">Analogous</option>
+              <option value="monochrome">Monochrome</option>
+            </select>
 
-        <div id="pm-extract-shift-row">
-          <div class="pm-slider-head">
-            <span class="cc-label">Hue shift</span>
-            <span class="pm-slider-val" id="pm-extract-shift-val">100%</span>
+            <div id="pm-extract-shift-row">
+              <div class="pm-slider-head">
+                <span class="cc-label">Hue shift</span>
+                <span class="pm-slider-val" id="pm-extract-shift-val">100%</span>
+              </div>
+              <input type="range" class="pm-range" id="pm-extract-shift" min="0" max="100" step="1" value="100" disabled aria-label="Shadow and highlight hue shift">
+            </div>
           </div>
-          <input type="range" class="pm-range" id="pm-extract-shift" min="0" max="100" step="1" value="100" disabled aria-label="Shadow and highlight hue shift">
         </div>
         <div class="pm-btn-row">
           <button type="button" class="cc-btn cc-clip-sm" id="pm-extract">Extract</button>
@@ -904,23 +963,40 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
       <div class="pm-section-body" id="pm-body-library">
         <div class="pm-lib cc-scroll" id="pm-lib" role="list" aria-label="Saved palettes"></div>
 
-        <label class="cc-label" for="pm-preset">Palette presets</label>
-        <select class="pm-select" id="pm-preset">
-          <option value="">Load a palette…</option>
-        </select>
+        <!-- The list above is what this card is for. Bringing colours in and
+             sending them out are two separate errands, and each folds away. -->
+        <div class="pm-group" data-group="library-import">
+          <button type="button" class="pm-subfold" aria-expanded="true" aria-controls="pm-group-library-import">
+            <span class="pm-fold-caret" aria-hidden="true">▾</span>Bring colours in
+          </button>
+          <div class="pm-group-body" id="pm-group-library-import">
+            <label class="cc-label" for="pm-preset">Palette presets</label>
+            <select class="pm-select" id="pm-preset">
+              <option value="">Load a palette…</option>
+            </select>
 
-        <label class="cc-label" for="pm-import-text">Paste hex codes</label>
-        <textarea class="pm-textarea" id="pm-import-text" spellcheck="false"
-          placeholder="#1a1c2c #5d275d #b13e53 … — any text; hex codes are scraped out of it"></textarea>
-        <div class="pm-btn-row">
-          <button type="button" class="cc-btn cc-clip-sm" id="pm-import-paste">Import text</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-import-file">Import file</button>
-          <input type="file" id="pm-pal-file" accept=".hex,.txt,.gpl,.pal,.json,.act,text/plain,application/json" class="cc-visually-hidden">
+            <label class="cc-label" for="pm-import-text">Paste hex codes</label>
+            <textarea class="pm-textarea" id="pm-import-text" spellcheck="false"
+              placeholder="#1a1c2c #5d275d #b13e53 … — any text; hex codes are scraped out of it"></textarea>
+            <div class="pm-btn-row">
+              <button type="button" class="cc-btn cc-clip-sm" id="pm-import-paste">Import text</button>
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-import-file">Import file</button>
+              <input type="file" id="pm-pal-file" accept=".hex,.txt,.gpl,.pal,.json,.act,text/plain,application/json" class="cc-visually-hidden">
+            </div>
+          </div>
         </div>
-        <div class="pm-btn-row">
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-hex">.hex</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-gpl">.gpl</button>
-          <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy-hex">Copy list</button>
+
+        <div class="pm-group" data-group="library-export">
+          <button type="button" class="pm-subfold" aria-expanded="true" aria-controls="pm-group-library-export">
+            <span class="pm-fold-caret" aria-hidden="true">▾</span>Send this palette out
+          </button>
+          <div class="pm-group-body" id="pm-group-library-export">
+            <div class="pm-btn-row">
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-hex">.hex</button>
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-export-gpl">.gpl</button>
+              <button type="button" class="cc-btn cc-btn--outline cc-clip-sm" id="pm-copy-hex">Copy list</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1104,23 +1180,32 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
           </div>
           <input type="range" class="pm-range" id="pm-merge-colors" min="0" max="100" step="1" value="0" aria-label="Merge similar palette colours">
         </div>
-        <label class="pm-check"><input type="checkbox" id="pm-outline"> Outline regions</label>
-        <div class="pm-row">
-          <input type="color" id="pm-outline-color" value="#000000" aria-label="Outline colour">
-          <div class="pm-grow">
-            <div class="pm-slider-head">
-              <span class="cc-label">Width</span>
-              <span class="pm-slider-val" id="pm-outline-width-val">1 px</span>
+        <!-- Outlining is a different operation from merging — four controls
+             that are all off until the checkbox is on. -->
+        <div class="pm-group" data-group="segment-outline">
+          <button type="button" class="pm-subfold" aria-expanded="true" aria-controls="pm-group-segment-outline">
+            <span class="pm-fold-caret" aria-hidden="true">▾</span>Outline
+          </button>
+          <div class="pm-group-body" id="pm-group-segment-outline">
+            <label class="pm-check"><input type="checkbox" id="pm-outline"> Outline regions</label>
+            <div class="pm-row">
+              <input type="color" id="pm-outline-color" value="#000000" aria-label="Outline colour">
+              <div class="pm-grow">
+                <div class="pm-slider-head">
+                  <span class="cc-label">Width</span>
+                  <span class="pm-slider-val" id="pm-outline-width-val">1 px</span>
+                </div>
+                <input type="range" class="pm-range" id="pm-outline-width" min="1" max="4" step="1" value="1" aria-label="Outline width">
+              </div>
             </div>
-            <input type="range" class="pm-range" id="pm-outline-width" min="1" max="4" step="1" value="1" aria-label="Outline width">
+            <div>
+              <div class="pm-slider-head">
+                <span class="cc-label">Min region</span>
+                <span class="pm-slider-val" id="pm-outline-min-val">Off</span>
+              </div>
+              <input type="range" class="pm-range" id="pm-outline-min" min="0" max="512" step="1" value="0" aria-label="Minimum region area to outline">
+            </div>
           </div>
-        </div>
-        <div>
-          <div class="pm-slider-head">
-            <span class="cc-label">Min region</span>
-            <span class="pm-slider-val" id="pm-outline-min-val">Off</span>
-          </div>
-          <input type="range" class="pm-range" id="pm-outline-min" min="0" max="512" step="1" value="0" aria-label="Minimum region area to outline">
         </div>
       </div>
     </section>
