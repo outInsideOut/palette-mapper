@@ -1242,6 +1242,10 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
       </div>
       <div class="pm-section-body" id="pm-body-adjust">
         <div>
+          <div class="pm-slider-head"><span class="cc-label">Black point</span><span class="pm-slider-val" id="pm-black-point-val">Off</span></div>
+          <input type="range" class="pm-range" id="pm-black-point" min="0" max="128" step="1" value="0" aria-label="Black point">
+        </div>
+        <div>
           <div class="pm-slider-head"><span class="cc-label">Brightness</span><span class="pm-slider-val" id="pm-brightness-val">0</span></div>
           <input type="range" class="pm-range" id="pm-brightness" min="-100" max="100" step="1" value="0" aria-label="Brightness">
         </div>

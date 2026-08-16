@@ -888,6 +888,7 @@ function readOptions() {
     ditherAmt: +els.ditherAmt.value / 100,
     pixel: +els.pixel.value,
     smooth: els.smooth.checked,
+    blackPoint: +els.blackPoint.value,
     brightness: +els.brightness.value,
     contrast: +els.contrast.value,
     saturation: +els.saturation.value,
@@ -941,17 +942,29 @@ function drawWork(dims, smooth) {
   return workCtx.getImageData(0, 0, dims.w, dims.h);
 }
 
-/* Brightness/contrast/gamma act identically on all three channels, so they
-   collapse into one 256-entry table. Saturation needs the whole triple and is
-   applied afterwards. */
+/* Black point/brightness/contrast/gamma act identically on all three channels,
+   so they collapse into one 256-entry table. Saturation needs the whole triple
+   and is applied afterwards.
+
+   Black point runs first, in levels order: everything at or below it is crushed
+   to 0 and the rest is stretched back out to fill the range. It exists mainly to
+   rescue dark linework. Downscaling averages a one-pixel black outline together
+   with whatever it sits on, so the line arrives at the matcher as a mid grey and
+   matches to some mid palette entry instead of the dark one — the outline
+   dissolves. Pulling the black point up to just above that blended grey pushes
+   it back to black before matching, and the line survives. */
 function buildToneLut(opts) {
   var lut = new Float32Array(256), i, v;
+  var bp = clamp(opts.blackPoint || 0, 0, 254);
+  var bpScale = 255 / (255 - bp);
   var bright = opts.brightness * 1.275;                     // ±127.5
   var c = opts.contrast * 2.55;
   var cf = (259 * (c + 255)) / (255 * (259 - c));           // standard contrast factor
   var invGamma = 1 / opts.gamma;
   for (i = 0; i < 256; i++) {
-    v = 255 * Math.pow(i / 255, invGamma);
+    v = i;
+    if (bp) v = Math.max(0, (v - bp) * bpScale);            // must stay ≥0 for pow()
+    v = 255 * Math.pow(v / 255, invGamma);
     v = v + bright;
     v = cf * (v - 128) + 128;
     lut[i] = v;                                             // deliberately unclamped
@@ -960,7 +973,7 @@ function buildToneLut(opts) {
 }
 
 function hasAdjustments(opts) {
-  return opts.brightness !== 0 || opts.contrast !== 0 ||
+  return opts.blackPoint !== 0 || opts.brightness !== 0 || opts.contrast !== 0 ||
          opts.saturation !== 0 || Math.abs(opts.gamma - 1) > 0.001;
 }
 
@@ -1936,7 +1949,7 @@ function doExtract(append) {
 
 var PRESET_CONTROLS = [
   'pm-metric', 'pm-dither', 'pm-dither-amt', 'pm-pixel', 'pm-smooth', 'pm-alpha-cut',
-  'pm-brightness', 'pm-contrast', 'pm-saturation', 'pm-gamma',
+  'pm-black-point', 'pm-brightness', 'pm-contrast', 'pm-saturation', 'pm-gamma',
   'pm-denoise', 'pm-speck', 'pm-tolerance', 'pm-smooth-stipple',
   'pm-merge-colors', 'pm-outline', 'pm-outline-color', 'pm-outline-width', 'pm-outline-min',
   'pm-export-scale', 'pm-export-full'
@@ -2608,6 +2621,7 @@ function saveSettings() {
     outlineWidth: els.outlineWidth.value,
     outlineMin: els.outlineMin.value,
     outlineColorTouched: state.outlineColorTouched,
+    blackPoint: els.blackPoint.value,
     brightness: els.brightness.value,
     contrast: els.contrast.value,
     saturation: els.saturation.value,
@@ -2646,6 +2660,7 @@ function loadSettings() {
   if (s.outlineWidth != null) els.outlineWidth.value = s.outlineWidth;
   if (s.outlineMin != null) els.outlineMin.value = s.outlineMin;
   state.outlineColorTouched = !!s.outlineColorTouched;
+  if (s.blackPoint != null) els.blackPoint.value = s.blackPoint;
   if (s.brightness != null) els.brightness.value = s.brightness;
   if (s.contrast != null) els.contrast.value = s.contrast;
   if (s.saturation != null) els.saturation.value = s.saturation;
@@ -2781,6 +2796,7 @@ function updateFooter() {
 function syncSliderLabels() {
   els.ditherAmtVal.textContent = els.ditherAmt.value + '%';
   els.pixelVal.textContent = els.pixel.value + '×';
+  els.blackPointVal.textContent = +els.blackPoint.value ? els.blackPoint.value : 'Off';
   els.brightnessVal.textContent = els.brightness.value;
   els.contrastVal.textContent = els.contrast.value;
   els.saturationVal.textContent = els.saturation.value;
@@ -2910,7 +2926,7 @@ function cacheEls() {
     'mergeColors', 'outline', 'outlineColor', 'outlineWidth', 'outlineMin',
     'cleanNote', 'segmentNote',
     'setup', 'setupName', 'setupPalette', 'setupNote', 'setupFile',
-    'brightness', 'contrast', 'saturation', 'gamma',
+    'blackPoint', 'brightness', 'contrast', 'saturation', 'gamma',
     'exportScale', 'exportFull', 'time', 'workDims', 'exportDims',
     'viewport', 'drop', 'splitHandle', 'zoomVal',
     'extractN', 'extractMethod', 'extractScheme', 'extractShift'
@@ -2944,6 +2960,7 @@ function cacheEls() {
   els.footMetric = $('pm-foot-metric');
   els.ditherAmtVal = $('pm-dither-amt-val');
   els.pixelVal = $('pm-pixel-val');
+  els.blackPointVal = $('pm-black-point-val');
   els.brightnessVal = $('pm-brightness-val');
   els.contrastVal = $('pm-contrast-val');
   els.saturationVal = $('pm-saturation-val');
@@ -3360,7 +3377,7 @@ function wireControls() {
 
   // Anything that changes the mapping re-renders; anything cosmetic doesn't.
   [els.metric, els.dither, els.pixel, els.smooth, els.alphaCut,
-   els.brightness, els.contrast, els.saturation, els.gamma, els.ditherAmt,
+   els.blackPoint, els.brightness, els.contrast, els.saturation, els.gamma, els.ditherAmt,
    els.denoise, els.speck, els.tolerance, els.smoothStipple,
    els.mergeColors, els.outline, els.outlineWidth, els.outlineMin].forEach(function (el) {
     el.addEventListener('input', function () {
@@ -3426,6 +3443,7 @@ function wireControls() {
   });
 
   $('pm-adjust-reset').addEventListener('click', function () {
+    els.blackPoint.value = 0;
     els.brightness.value = 0;
     els.contrast.value = 0;
     els.saturation.value = 0;

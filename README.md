@@ -125,10 +125,18 @@ off to sample a single pixel per block, which keeps edges harsher and colours mo
 
 ### Pre-map adjust
 
-Brightness, contrast, saturation and gamma, applied **before** matching. This is often the
-difference between a muddy result and a good one: if your palette is darker than your image,
-pulling brightness down first gives the matcher something closer to work with. **Reset** puts
-them all back.
+Black point, brightness, contrast, saturation and gamma, applied **before** matching. This is
+often the difference between a muddy result and a good one: if your palette is darker than your
+image, pulling brightness down first gives the matcher something closer to work with. **Reset**
+puts them all back.
+
+**Black point** crushes everything at or below it to pure black and stretches the rest back out
+to fill the range. Reach for it when **outlines dissolve at larger pixel sizes**: averaging a
+one-pixel black line together with the lighter area it sits on hands the matcher a mid grey,
+which then matches to a mid palette entry and the line disappears. Raising the black point to
+just above that blended grey — 30–60 is the usual territory — pushes it back to black before
+matching, and the linework survives the downscale. It runs first, so gamma and contrast still
+work on the stretched range.
 
 ### Clean up
 
