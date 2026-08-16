@@ -189,6 +189,8 @@ body.cc-app {
 }
 .pm-text--mono { font-family: var(--cc-font-mono); text-transform: uppercase; }
 .pm-select:focus, .pm-text:focus { outline: none; border-color: rgb(var(--cc-accent)); }
+.pm-select:disabled { opacity: 0.45; cursor: not-allowed; }
+.pm-range:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .pm-textarea {
   width: 100%;
@@ -769,6 +771,31 @@ body.pm-dragging .pm-viewport { outline: var(--cc-field-border-w) dashed rgb(var
             <span class="pm-slider-val" id="pm-extract-n-val">16</span>
           </div>
           <input type="range" class="pm-range" id="pm-extract-n" min="2" max="64" step="1" value="16" aria-label="Number of colours to extract">
+        </div>
+
+        <label class="cc-label" for="pm-extract-method">Method</label>
+        <select class="pm-select" id="pm-extract-method">
+          <option value="cluster">Perceptual — sample the image</option>
+          <option value="theory">Colour theory — build ramps</option>
+        </select>
+
+        <label class="cc-label" for="pm-extract-scheme">Harmony</label>
+        <select class="pm-select" id="pm-extract-scheme" disabled>
+          <option value="auto">Auto — the image's own hues</option>
+          <option value="complementary">Complementary</option>
+          <option value="split">Split complementary</option>
+          <option value="triadic">Triadic</option>
+          <option value="tetradic">Tetradic</option>
+          <option value="analogous">Analogous</option>
+          <option value="monochrome">Monochrome</option>
+        </select>
+
+        <div id="pm-extract-shift-row">
+          <div class="pm-slider-head">
+            <span class="cc-label">Hue shift</span>
+            <span class="pm-slider-val" id="pm-extract-shift-val">100%</span>
+          </div>
+          <input type="range" class="pm-range" id="pm-extract-shift" min="0" max="100" step="1" value="100" disabled aria-label="Shadow and highlight hue shift">
         </div>
         <div class="pm-btn-row">
           <button type="button" class="cc-btn cc-clip-sm" id="pm-extract">Extract</button>

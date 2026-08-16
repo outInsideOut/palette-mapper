@@ -31,11 +31,41 @@ Five ways, all in the left-hand panel.
 
 | | How |
 | --- | --- |
-| **Extract** | Pulls the N most representative colours out of the image. Set the count, press *Extract* to replace the palette or *Add to palette* to append. |
+| **Extract** | Pulls a palette out of the image. Set the count, press *Extract* to replace the palette or *Add to palette* to append. Two methods — see below. |
 | **Eyedropper** | Toggle it on and click the image to grab exact colours. It samples the original at full resolution, so what you click is what you get regardless of zoom. |
 | **By hand** | Click **+** to add a swatch, click a swatch to edit it with the picker or by typing a hex value. Reorder by dragging, or with the **◀ Move / Move ▶** buttons. |
 | **Import** | Paste *any* text containing hex codes — a Lospec page, a CSS file, a column of codes — and they'll be scraped out. Or load a `.hex`, `.gpl`, `.pal`, `.act` or `.json` file. |
 | **Presets** | Game Boy, PICO-8, Sweetie 16, CGA 16, Solarized, greyscale ramps and web-safe. |
+
+### Two ways to extract
+
+**Perceptual** samples the image. It finds the colours your picture is actually made of, which
+maps with the highest fidelity — but the result is a set of cluster centroids, so it can be
+lumpy: five near-identical browns where the image happens to be brown-heavy, and no clean tonal
+steps anywhere.
+
+**Colour theory** builds instead of samples. It reads the dominant hue families out of the image
+and then *constructs* a ramp for each, using three ideas a painter would recognise:
+
+- **Chroma peaks in the midtones.** Neither very dark nor very light colours can be very
+  colourful, so a ramp that holds saturation flat looks chalky at one end and muddy at the other.
+  Saturation stays higher in the shadows than the highlights, the way paint behaves.
+- **Shadows cool, highlights warm.** Hue drifts toward blue-violet as a ramp darkens and toward
+  yellow as it lightens. This is what stops a ramp reading as a flat tint of one colour. Reds
+  shade into magenta, greens into teal, blues into cyan. The **Hue shift** slider controls how far
+  — set it to 0 for a strictly single-hue ramp.
+- **Harmony.** Leave **Harmony** on *Auto* and it uses the hue families the image actually has.
+  Pick a scheme and it instead anchors on the image's strongest hue and derives the rest at fixed
+  angles round the wheel — complementary at 180°, triadic at 120°, tetradic at 90°, analogous at
+  30°, or monochrome for a single hue plus greys.
+
+Every colour is fitted into sRGB by easing saturation back rather than clipping channels, which
+would otherwise flatten and skew the saturated end of a ramp. The colour count is always
+respected: if the image only has three hue families, you get three longer ramps rather than a
+short palette.
+
+It's the better starting point for a designed look; perceptual is the better one for matching a
+specific piece of art closely. Extract with one, then hand-edit.
 
 **Sort** reorganises the palette into ramps, the way a hand-built palette is usually laid out:
 the greys first running dark to light, then each colour family in turn round the wheel from red,

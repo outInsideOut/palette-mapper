@@ -537,6 +537,221 @@ function extractPalette(imageData, count) {
 }
 
 /* ---------------------------------------------------------------------------
+   4b. COLOUR-THEORY EXTRACTION
+   ---------------------------------------------------------------------------
+   The clustering extractor above answers "which colours is this image actually
+   made of" — it samples. This one answers a different question: "what palette
+   would an artist build for this image". It reads the dominant hue families
+   out of the picture and then *constructs* ramps, rather than returning the
+   cluster centroids it happened to land on.
+
+   Three pieces of colour theory do the work:
+
+     - Chroma peaks in the midtones. A ramp that holds chroma constant looks
+       chalky at the light end and muddy at the dark end, because neither very
+       dark nor very light colours can be very colourful.
+     - Shadows cool, highlights warm. Shifting hue toward blue as a ramp
+       darkens and toward yellow as it lightens is the oldest trick in
+       painting, and it is what stops a ramp reading as a flat tint of one hue.
+     - Harmony. Hue relationships at fixed angles round the wheel —
+       complementary at 180, triadic at 120 and so on — give a palette a
+       deliberate structure instead of whatever the source happened to contain.
+   ------------------------------------------------------------------------ */
+
+/* Where hue drifts to at the extremes, in OKLab hue degrees. */
+var SHADOW_HUE = 264;      /* blue-violet */
+var HIGHLIGHT_HUE = 85;    /* warm yellow */
+var HUE_SHIFT_MAX = 18;    /* degrees of drift at the very ends of a ramp */
+/* Chroma retained at each end of a ramp, as a fraction of its peak. */
+var RAMP_SHADOW_CHROMA = 0.55;
+var RAMP_HIGHLIGHT_CHROMA = 0.30;
+
+var HARMONY_SCHEMES = {
+  auto:          null,                  /* take the families the image really has */
+  complementary: [0, 180],
+  split:         [0, 150, 210],
+  triadic:       [0, 120, 240],
+  tetradic:      [0, 90, 180, 270],
+  analogous:     [0, 30, 330],
+  monochrome:    [0]
+};
+
+function shortestHueStep(from, to) {
+  var d = (to - from) % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+
+/* Reduce chroma until the colour actually fits in sRGB.
+
+   oklabToRgb clamps each channel independently, which for an out-of-gamut
+   colour silently changes its hue as well as its chroma — the saturated end of
+   a ramp goes flat and drifts. Backing chroma off until the conversion stops
+   clipping keeps the hue the ramp asked for. */
+function fitToGamut(L, C, hDeg) {
+  var rad = hDeg * Math.PI / 180, rgb = [0, 0, 0];
+  var lo = 0, hi = C, i, mid;
+  var inGamut = function (c) {
+    oklabToRgb(L, Math.cos(rad) * c, Math.sin(rad) * c, rgb);
+    /* linearToSrgb clamps, so a clipped colour is one that lands exactly on a
+       boundary. Re-converting would be exact; testing the boundary is enough. */
+    return rgb[0] > 0.001 && rgb[0] < 254.999 &&
+           rgb[1] > 0.001 && rgb[1] < 254.999 &&
+           rgb[2] > 0.001 && rgb[2] < 254.999;
+  };
+  if (inGamut(C)) { oklabToRgb(L, Math.cos(rad) * C, Math.sin(rad) * C, rgb); return rgb; }
+  for (i = 0; i < 16; i++) {
+    mid = (lo + hi) / 2;
+    if (inGamut(mid)) lo = mid; else hi = mid;
+  }
+  oklabToRgb(L, Math.cos(rad) * lo, Math.sin(rad) * lo, rgb);
+  return rgb;
+}
+
+/* Build one ramp of `steps` colours around a base hue. */
+function buildRamp(hueDeg, peakChroma, steps, loL, hiL, shift) {
+  var out = [], i, t, L, chroma, hue, drift, target, rgb;
+  for (i = 0; i < steps; i++) {
+    t = steps === 1 ? 0.5 : i / (steps - 1);
+    L = loL + (hiL - loL) * t;
+
+    /* Chroma peaks mid-ramp and falls away at both ends — but never to zero,
+       or the ends of every ramp come out pure grey and the whole thing reads
+       as a tinted greyscale. The floor is asymmetric because that is how paint
+       behaves: shadows stay deep and saturated, highlights wash out toward
+       pastel. The 0.65 exponent keeps the shoulders broad rather than pinched. */
+    var floor = RAMP_SHADOW_CHROMA + (RAMP_HIGHLIGHT_CHROMA - RAMP_SHADOW_CHROMA) * t;
+    chroma = peakChroma * (floor + (1 - floor) * Math.pow(Math.sin(Math.PI * t), 0.65));
+
+    /* Cool the shadows, warm the highlights, strongest at the extremes. */
+    drift = (t - 0.5) * 2;                          /* -1 at black, +1 at white */
+    target = drift < 0 ? SHADOW_HUE : HIGHLIGHT_HUE;
+    hue = hueDeg + shortestHueStep(hueDeg, target) *
+          Math.abs(drift) * (HUE_SHIFT_MAX / 180) * shift;
+
+    rgb = fitToGamut(L, chroma, hue);
+    out.push(rgbToHex(rgb[0], rgb[1], rgb[2]));
+  }
+  return out;
+}
+
+/* Read the dominant hue families out of an image.
+
+   Hue is weighted by chroma as well as by pixel count: a huge field of near
+   grey should not out-vote a small area of vivid colour when deciding what the
+   image is *about*, and a grey's hue angle is close to meaningless anyway. */
+function dominantHues(samples, want) {
+  var BINS = 72, hist = new Float64Array(BINS), i, c;
+  var chromaSum = 0, chromaCount = 0;
+  var lab = [0, 0, 0];
+
+  for (i = 0; i < samples.length; i++) {
+    rgbToOklab(samples[i][0], samples[i][1], samples[i][2], lab);
+    var C = Math.sqrt(lab[1] * lab[1] + lab[2] * lab[2]);
+    if (C < NEUTRAL_CHROMA) continue;
+    var h = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+    if (h < 0) h += 360;
+    hist[Math.floor(h / 360 * BINS) % BINS] += C;
+    chromaSum += C; chromaCount++;
+  }
+  var peakChroma = chromaCount ? (chromaSum / chromaCount) * 1.9 : 0.11;
+
+  /* Smooth the histogram so one family does not register as several peaks. */
+  var smooth = new Float64Array(BINS);
+  for (i = 0; i < BINS; i++) {
+    smooth[i] = hist[(i - 1 + BINS) % BINS] * 0.25 + hist[i] * 0.5 + hist[(i + 1) % BINS] * 0.25;
+  }
+
+  /* Greedily take the strongest bin, then suppress its neighbourhood so the
+     next pick is a genuinely different family rather than the same peak again. */
+  var hues = [], SUPPRESS = Math.round(BINS * (HUE_FAMILY_GAP / 360));
+  for (c = 0; c < want; c++) {
+    var best = -1, bestVal = 0;
+    for (i = 0; i < BINS; i++) if (smooth[i] > bestVal) { bestVal = smooth[i]; best = i; }
+    if (best < 0) break;
+    /* Refine to the weighted centre of the peak rather than the bin centre. */
+    var wx = 0, wy = 0;
+    for (i = -2; i <= 2; i++) {
+      var b = (best + i + BINS) % BINS, ang = (b + 0.5) / BINS * 2 * Math.PI;
+      wx += Math.cos(ang) * smooth[b]; wy += Math.sin(ang) * smooth[b];
+    }
+    var refined = Math.atan2(wy, wx) * 180 / Math.PI;
+    hues.push(refined < 0 ? refined + 360 : refined);
+    for (i = -SUPPRESS; i <= SUPPRESS; i++) smooth[(best + i + BINS) % BINS] = 0;
+  }
+  return { hues: hues, peakChroma: clamp(peakChroma, 0.06, 0.22) };
+}
+
+/* The colour-theory extractor. Returns a palette of constructed ramps. */
+function extractByTheory(imageData, count, scheme, shift) {
+  var samples = samplePixels(imageData, EXTRACT_SAMPLES);
+  if (!samples.length) return [];
+
+  /* Lightness envelope of the image, so the ramps span what is actually there
+     rather than always running pure black to pure white. */
+  var lab = [0, 0, 0], loL = 1, hiL = 0, i;
+  for (i = 0; i < samples.length; i++) {
+    rgbToOklab(samples[i][0], samples[i][1], samples[i][2], lab);
+    if (lab[0] < loL) loL = lab[0];
+    if (lab[0] > hiL) hiL = lab[0];
+  }
+  if (hiL - loL < 0.25) { loL = Math.max(0, loL - 0.15); hiL = Math.min(1, hiL + 0.15); }
+
+  /* Aim for ramps of roughly six steps to decide how many hue families to go
+     looking for — one of the ramps is the neutrals. */
+  var wanted = clamp(Math.round(count / 6), 2, 9);
+  var angles = HARMONY_SCHEMES[scheme];
+  var found = dominantHues(samples, angles ? 1 : Math.max(1, wanted - 1));
+  var baseHues;
+
+  if (angles) {
+    /* Anchor the scheme on the image's strongest hue, then repeat the pattern
+       outward if more ramps are needed than the scheme has angles. */
+    var base = found.hues.length ? found.hues[0] : 0;
+    baseHues = [];
+    for (i = 0; i < Math.max(1, wanted - 1); i++) {
+      var a = angles[i % angles.length];
+      var wrap = Math.floor(i / angles.length) * (scheme === 'monochrome' ? 0 : 12);
+      baseHues.push((base + a + wrap) % 360);
+    }
+  } else {
+    baseHues = found.hues;
+    if (!baseHues.length) baseHues = [0];
+  }
+
+  /* Drop hues the scheme repeated — monochrome asks for one hue however many
+     ramps were wanted, and emitting it several times would just build the same
+     ramp over and over for dedupe to throw away, leaving the palette short. */
+  baseHues = baseHues.filter(function (h, idx) {
+    return !baseHues.slice(0, idx).some(function (prev) {
+      return Math.abs(shortestHueStep(prev, h)) < 5;
+    });
+  });
+
+  /* Now that the real number of ramps is known, split the requested count
+     across them. An image with only three hue families should still hand back
+     the number of colours that was asked for — as longer ramps, not as a
+     short palette. The remainder goes to the earliest ramps. */
+  var totalRamps = baseHues.length + 1;
+  var steps = Math.max(3, Math.floor(count / totalRamps));
+  var remainder = count - steps * totalRamps;
+
+  var out = [];
+  /* Neutrals first, matching the ramp sort's ordering. */
+  out = out.concat(buildRamp(0, 0, steps + (remainder-- > 0 ? 1 : 0), loL, hiL, 0));
+  baseHues.forEach(function (h) {
+    out = out.concat(buildRamp(h, found.peakChroma, steps + (remainder-- > 0 ? 1 : 0),
+                               loL, hiL, shift));
+  });
+
+  /* Constructed ramps can collide at the very dark and very light ends where
+     chroma has fallen to nothing. Trim duplicates and top back up if short. */
+  out = dedupe(out);
+  return out.slice(0, count);
+}
+
+/* ---------------------------------------------------------------------------
    5. PALETTE FILE FORMATS
    ------------------------------------------------------------------------ */
 
@@ -1690,7 +1905,10 @@ function doExtract(append) {
   // Extraction only needs a representative sample, so work off a small buffer.
   var dims = workDims({ pixel: 1 }, false);
   var data = drawWork(dims, true);
-  var colors = extractPalette(data, n);
+  var theory = els.extractMethod.value === 'theory';
+  var colors = theory
+    ? extractByTheory(data, n, els.extractScheme.value, +els.extractShift.value / 100)
+    : extractPalette(data, n);
   if (!colors.length) { toast('Could not read any colours from that image.', true); return; }
   if (append) {
     addColors(colors);
@@ -1950,6 +2168,9 @@ function saveSettings() {
     exportFull: els.exportFull.checked,
     live: els.live.checked,
     extractN: els.extractN.value,
+    extractMethod: els.extractMethod.value,
+    extractScheme: els.extractScheme.value,
+    extractShift: els.extractShift.value,
     activePresetId: state.activePresetId,
     setupPalette: els.setupPalette.checked,
     view: state.view,
@@ -1985,6 +2206,9 @@ function loadSettings() {
   if (s.exportFull != null) els.exportFull.checked = !!s.exportFull;
   if (s.live != null) els.live.checked = !!s.live;
   if (s.extractN != null) els.extractN.value = s.extractN;
+  if (s.extractMethod) els.extractMethod.value = s.extractMethod;
+  if (s.extractScheme) els.extractScheme.value = s.extractScheme;
+  if (s.extractShift != null) els.extractShift.value = s.extractShift;
   if (s.activePresetId) state.activePresetId = s.activePresetId;
   if (s.setupPalette != null) els.setupPalette.checked = !!s.setupPalette;
   if (s.view) state.view = s.view;
@@ -2115,6 +2339,7 @@ function syncSliderLabels() {
   els.gammaVal.textContent = (+els.gamma.value / 100).toFixed(2);
   els.exportScaleVal.textContent = els.exportScale.value + '×';
   els.extractNVal.textContent = els.extractN.value;
+  els.extractShiftVal.textContent = els.extractShift.value + '%';
   els.alphaCutVal.textContent = els.alphaCut.value;
 
   var dn = +els.denoise.value;
@@ -2240,7 +2465,7 @@ function cacheEls() {
     'brightness', 'contrast', 'saturation', 'gamma',
     'exportScale', 'exportFull', 'time', 'workDims', 'exportDims',
     'viewport', 'drop', 'splitHandle', 'zoomVal',
-    'extractN'
+    'extractN', 'extractMethod', 'extractScheme', 'extractShift'
   ].forEach(function (k) {
     els[k] = $('pm-' + k.replace(/[A-Z]/g, function (m) { return '-' + m.toLowerCase(); }));
   });
@@ -2277,6 +2502,7 @@ function cacheEls() {
   els.gammaVal = $('pm-gamma-val');
   els.exportScaleVal = $('pm-export-scale-val');
   els.extractNVal = $('pm-extract-n-val');
+  els.extractShiftVal = $('pm-extract-shift-val');
   els.alphaCutVal = $('pm-alpha-cut-val');
   els.denoiseVal = $('pm-denoise-val');
   els.speckVal = $('pm-speck-val');
@@ -2691,6 +2917,19 @@ function wireControls() {
 
   els.extractN.addEventListener('input', function () { syncSliderLabels(); saveSettings(); });
 
+  /* Harmony and hue shift only mean anything to the constructed ramps, so they
+     grey out when the sampling method is selected rather than sitting there
+     looking live and doing nothing. */
+  function syncExtractMode() {
+    var theory = els.extractMethod.value === 'theory';
+    els.extractScheme.disabled = !theory;
+    els.extractShift.disabled = !theory;
+  }
+  els.extractMethod.addEventListener('change', function () { syncExtractMode(); saveSettings(); });
+  els.extractScheme.addEventListener('change', saveSettings);
+  els.extractShift.addEventListener('input', function () { syncSliderLabels(); saveSettings(); });
+  syncExtractMode();
+
   els.setup.addEventListener('change', function () {
     if (els.setup.value) applyPreset(els.setup.value);
   });
@@ -2813,6 +3052,11 @@ function init() {
     parsePaletteText: parsePaletteText,
     buildMatcher: buildMatcher,
     extractPalette: extractPalette,
+    extractByTheory: extractByTheory,
+    buildRamp: buildRamp,
+    fitToGamut: fitToGamut,
+    oklch: oklch,
+    sortIntoRamps: sortIntoRamps,
     labelRegions: labelRegions,
     denoiseBuffer: denoiseBuffer,
     syncOutlineColor: syncOutlineColor,
