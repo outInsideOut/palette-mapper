@@ -37,6 +37,12 @@ Five ways, all in the left-hand panel.
 | **Import** | Paste *any* text containing hex codes — a Lospec page, a CSS file, a column of codes — and they'll be scraped out. Or load a `.hex`, `.gpl`, `.pal`, `.act` or `.json` file. |
 | **Presets** | Game Boy, PICO-8, Sweetie 16, CGA 16, Solarized, greyscale ramps and web-safe. |
 
+**Sort** reorganises the palette into ramps, the way a hand-built palette is usually laid out:
+the greys first running dark to light, then each colour family in turn round the wheel from red,
+every family also running dark to light. It splits a family further when it holds both a muted
+and a saturated ramp — Sweetie 16's blue-greys and its vivid blues come out as two separate runs
+rather than interleaved. Nothing is added or removed, so it's safe to hit at any point.
+
 Palettes you **Save** go to the *Library* and stay there between sessions. You can export one as
 `.hex` or `.gpl` to use in Aseprite, Photoshop or GIMP, or **Copy list** to grab the hex codes.
 

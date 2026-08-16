@@ -187,6 +187,113 @@ function oklabLightness(hex) {
   return lab[0];
 }
 
+/* OKLab in cylindrical form: lightness, chroma (distance from grey) and hue
+   (angle round the colour wheel). Same space, but it separates "how colourful"
+   from "which colour", which is what makes a palette sortable by family. */
+function oklch(hex) {
+  var rgb = hexToRgb(hex) || [0, 0, 0], lab = [0, 0, 0];
+  rgbToOklab(rgb[0], rgb[1], rgb[2], lab);
+  var h = Math.atan2(lab[2], lab[1]) * 180 / Math.PI;
+  return {
+    hex: hex,
+    L: lab[0],
+    C: Math.sqrt(lab[1] * lab[1] + lab[2] * lab[2]),
+    h: h < 0 ? h + 360 : h
+  };
+}
+
+/* Below this chroma a colour reads as a grey, and its hue angle is numerically
+   real but visually meaningless — sorting neutrals by hue is what sprays them
+   randomly through an otherwise ordered palette. */
+var NEUTRAL_CHROMA = 0.028;
+/* A hue step wider than this starts a new family. A single ramp drifts by only
+   a few degrees as it lightens, so this can be tight without breaking one up. */
+var HUE_FAMILY_GAP = 22;
+/* One hue can hold two ramps at different saturations — Sweetie 16's muted
+   blue-greys and its vivid blues are the same hue family. A chroma step this
+   wide separates them; a single ramp's chroma changes far more gradually. */
+var CHROMA_RAMP_GAP = 0.045;
+
+/* Sort a palette into ramps: the greys first, then each hue family in turn,
+   every family running dark to light.
+
+   Sorting on lightness alone — which is what this used to do — is a total
+   order on one axis, so any two colours that happen to share a lightness sit
+   next to each other however unrelated their hues are. That is why a red lands
+   between two greens. Grouping by hue first and only then ordering by
+   lightness is what produces the ramps artists actually work in. */
+function sortIntoRamps(colors) {
+  var items = colors.map(oklch);
+  var byL = function (a, b) { return a.L - b.L; };
+
+  var neutrals = items.filter(function (c) { return c.C < NEUTRAL_CHROMA; }).sort(byL);
+  var chromatic = items.filter(function (c) { return c.C >= NEUTRAL_CHROMA; });
+  if (!chromatic.length) return neutrals.map(function (c) { return c.hex; });
+
+  chromatic.sort(function (a, b) { return a.h - b.h; });
+  var n = chromatic.length, i, gap;
+
+  /* Cut the wheel at its widest gap before splitting into families. Without
+     this the seam falls at 0 degrees, which runs straight through the reds and
+     splits that family across both ends of the palette. */
+  var widest = -1, cut = 0;
+  for (i = 0; i < n; i++) {
+    gap = chromatic[(i + 1) % n].h - chromatic[i].h;
+    if (gap < 0) gap += 360;
+    if (gap > widest) { widest = gap; cut = (i + 1) % n; }
+  }
+
+  var families = [], current = [];
+  for (i = 0; i < n; i++) {
+    var here = chromatic[(cut + i) % n];
+    if (current.length) {
+      gap = here.h - chromatic[(cut + i - 1 + n) % n].h;
+      if (gap < 0) gap += 360;
+      if (gap > HUE_FAMILY_GAP) { families.push(current); current = []; }
+    }
+    current.push(here);
+  }
+  if (current.length) families.push(current);
+
+  /* Order the families round the wheel from red. The mean is taken as a vector
+     so a family straddling 0 degrees averages to roughly 0 rather than to 180. */
+  families.forEach(function (f) {
+    var x = 0, y = 0;
+    f.forEach(function (c) {
+      var r = c.h * Math.PI / 180;
+      x += Math.cos(r); y += Math.sin(r);
+    });
+    var m = Math.atan2(y, x) * 180 / Math.PI;
+    f.meanHue = m < 0 ? m + 360 : m;
+  });
+  families.sort(function (a, b) { return a.meanHue - b.meanHue; });
+
+  var out = neutrals;
+  families.forEach(function (f) {
+    splitByChroma(f).forEach(function (ramp) { out = out.concat(ramp.sort(byL)); });
+  });
+  return out.map(function (c) { return c.hex; });
+}
+
+/* Split one hue family into its separate ramps by looking for a jump in
+   chroma, muted ramps first. Without this a family holding both a greyed ramp
+   and a saturated one gets sorted by lightness into a single interleaved run,
+   which is the same problem as sorting the whole palette by lightness. */
+function splitByChroma(family) {
+  if (family.length < 3) return [family];
+  var sorted = family.slice().sort(function (a, b) { return a.C - b.C; });
+  var ramps = [], current = [sorted[0]], i;
+  for (i = 1; i < sorted.length; i++) {
+    if (sorted[i].C - sorted[i - 1].C > CHROMA_RAMP_GAP) {
+      ramps.push(current);
+      current = [];
+    }
+    current.push(sorted[i]);
+  }
+  ramps.push(current);
+  return ramps;
+}
+
 /* ---------------------------------------------------------------------------
    3. THE MATCHER
    ---------------------------------------------------------------------------
@@ -2389,7 +2496,7 @@ function wirePaletteUI() {
   });
 
   $('pm-sort').addEventListener('click', function () {
-    state.palette.colors.sort(function (a, b) { return oklabLightness(a) - oklabLightness(b); });
+    state.palette.colors = sortIntoRamps(state.palette.colors);
     state.selected = -1;
     renderSwatches();
     saveCurrent();
