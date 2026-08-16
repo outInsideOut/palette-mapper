@@ -196,12 +196,39 @@ The card header tells you where you stand — `Defaults`, `Custom`, the preset's
 Theme, zoom and view mode deliberately aren't saved in a preset — those are how you're looking at
 the work, not how the image is processed.
 
+### Taking your work with you
+
+Your presets and your palette **Library** live in this browser's storage, which a cache clear, a
+different browser or a new machine all take with them. **Export .json** writes both to one file you
+keep — every saved preset with its settings and its palette, and every palette in the library.
+**Import .json** reads one back.
+
+Both halves travel together on purpose: a preset can carry a palette, and splitting them across two
+files is how you end up with half a backup.
+
+Everything is matched by name on import. A preset or palette whose name you already have is
+updated, anything new is added, and nothing you named something else is touched — so exporting,
+editing elsewhere and re-importing is safe to repeat. The built-in presets and palettes aren't
+exported; every copy of the page already has them.
+
+You can also just drop an exported file onto the page, or feed it to *Import file* in the Library
+card — it's recognised as a backup rather than scraped for hex codes.
+
 ---
 
 ## Handy to know
 
 - **Keyboard** — <kbd>Ctrl</kbd>+<kbd>V</kbd> paste, <kbd>Ctrl</kbd>+<kbd>S</kbd> download,
   <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> before/split/after, arrows nudge the split divider.
+- **Fold a card** — click any card's header to collapse it to its title band, click again to open
+  it. Keeps the rails down to the handful of controls you actually use.
+- **Move a card** — drag a card by its header to reorder it, either within its own rail or across
+  to the other one, so the tools you reach for most sit where you want them. On a touch screen drag
+  by the grip (⠿) at the right of the header — a finger anywhere else on the header still scrolls
+  the panel. From the keyboard, focus a header and press <kbd>Alt</kbd>+<kbd>↑</kbd> /
+  <kbd>Alt</kbd>+<kbd>↓</kbd>.
+- The layout you end up with — the order of the cards and which ones are folded — is remembered
+  between visits.
 - **Paste a palette** — pasting text that contains hex codes, rather than an image, loads them as
   a palette. Copy a row of swatches off a palette site and paste straight into the page.
 - **What you see is what you export.** The preview works on a smaller copy for speed, but the

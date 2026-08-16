@@ -31,6 +31,12 @@ var LS_PALETTES = 'pm.palettes.v1';
 var LS_SETTINGS = 'pm.settings.v1';
 var LS_CURRENT  = 'pm.current.v1';
 var LS_PRESETS  = 'pm.presets.v1';
+var LS_FOLDS    = 'pm.folds.v1';
+var LS_CARD_ORDER = 'pm.cardorder.v1';
+
+/* Marker written into exported backup files and checked on import, so a
+   palette .json and a backup .json can be told apart on sight. */
+var DATA_FILE_FORMAT = 'palette-mapper-data';
 
 var state = {
   img: null,             // HTMLImageElement of the source
@@ -2122,6 +2128,420 @@ function resetToDefaults() {
   setStatus('Settings reset to defaults');
 }
 
+/* --- Your saved work as a file --------------------------------------------
+   Presets and the palette library otherwise only exist in localStorage, which
+   is one cache clear — or one new browser — away from gone. Export writes both
+   to a plain JSON file; import reads one back, on this machine or another.
+
+   Both halves travel together because they refer to each other: a preset can
+   carry a palette, and splitting them across two files is how you end up with
+   half a backup.
+   ------------------------------------------------------------------------ */
+
+function dataFilename() {
+  return 'palette-mapper-' + new Date().toISOString().slice(0, 10) + '.json';
+}
+
+function countLabel(n, one, many) {
+  return n + ' ' + (n === 1 ? one : many);
+}
+
+function exportData() {
+  if (!state.presets.length && !state.library.length) {
+    toast('Nothing saved to export yet.', true);
+    return;
+  }
+  var payload = {
+    format: DATA_FILE_FORMAT,
+    version: 1,
+    exported: new Date().toISOString(),
+    /* Built-in presets and the built-in palettes aren't written: every copy of
+       the page already has them, and a stale copy in a file would only fight
+       the current one on import. */
+    presets: state.presets,
+    palettes: state.library
+  };
+  downloadText(JSON.stringify(payload, null, 2), dataFilename(), 'application/json');
+
+  var parts = [];
+  if (state.presets.length) parts.push(countLabel(state.presets.length, 'preset', 'presets'));
+  if (state.library.length) parts.push(countLabel(state.library.length, 'palette', 'palettes'));
+  toast('Exported ' + parts.join(' and '));
+}
+
+/* Colours out of a file go through the same normaliser as pasted text, so
+   '#0f0', '0F0' and rubbish all end up either a full #rrggbb or dropped. */
+function sanitizeColors(raw) {
+  var colors = [];
+  if (!Array.isArray(raw)) return colors;
+  raw.forEach(function (c) {
+    if (colors.length >= MAX_COLORS) return;
+    var hex = typeof c === 'string' ? normalizeHex(c) : null;
+    if (hex) colors.push(hex);
+  });
+  return colors;
+}
+
+function sanitizePalette(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  var colors = sanitizeColors(raw.colors);
+  if (!colors.length) return null;
+  return {
+    id: newId('p'),
+    name: (typeof raw.name === 'string' ? raw.name.trim().slice(0, 40) : '') || 'Untitled',
+    colors: colors
+  };
+}
+
+/* Nothing from a file is trusted: only known control ids survive, only the
+   value types the controls actually take, and colours must parse as hex. A
+   preset that carries nothing usable is dropped rather than half-applied. */
+function sanitizePreset(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  var name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 40) : '';
+  if (!name) return null;
+
+  var src = (raw.settings && typeof raw.settings === 'object') ? raw.settings : {};
+  var settings = {}, kept = 0;
+  PRESET_CONTROLS.forEach(function (id) {
+    if (!(id in src)) return;
+    var v = src[id];
+    if (typeof v === 'boolean') { settings[id] = v; kept++; }
+    else if (typeof v === 'number' && isFinite(v)) { settings[id] = String(v); kept++; }
+    else if (typeof v === 'string') { settings[id] = v; kept++; }
+  });
+  if (!kept) return null;
+
+  var palette = null;
+  if (raw.palette && typeof raw.palette === 'object') {
+    var colors = sanitizeColors(raw.palette.colors);
+    if (colors.length) {
+      palette = { name: String(raw.palette.name || 'Untitled').slice(0, 40), colors: colors };
+    }
+  }
+
+  return {
+    id: newId('s'),
+    name: name,
+    settings: settings,
+    palette: palette,
+    outlineColorTouched: !!raw.outlineColorTouched
+  };
+}
+
+/* Ids from the file are discarded and reissued — nothing imported may collide
+   with a built-in preset or with something already saved here. */
+var idSeq = 0;
+function newId(prefix) {
+  return prefix + Date.now().toString(36) + '-' + (idSeq++).toString(36);
+}
+
+/* Both lists merge by name, the way Save does — re-importing your own file
+   after a few edits updates those entries instead of doubling them, and an
+   import never touches anything you named something else. */
+function mergeByName(list, incoming, apply) {
+  var fresh = [], updated = 0, skipped = 0;
+  incoming.forEach(function (raw) {
+    var item = apply.clean(raw);
+    if (!item) { skipped++; return; }
+    var existing = list.filter(function (x) {
+      return String(x.name).toLowerCase() === item.name.toLowerCase();
+    })[0];
+    if (existing) { apply.onto(existing, item); updated++; }
+    else fresh.push(item);
+  });
+  return { list: fresh.concat(list), added: fresh.length, updated: updated, skipped: skipped };
+}
+
+function tally(label, r) {
+  var parts = [];
+  if (r.added) parts.push(r.added + ' added');
+  if (r.updated) parts.push(r.updated + ' updated');
+  if (r.skipped) parts.push(r.skipped + ' skipped');
+  return parts.length ? label + ': ' + parts.join(', ') : '';
+}
+
+function importData(data, label) {
+  /* A bare array is read as presets — that was the shape of the first files
+     this wrote, and it is the only thing a top-level array could sensibly be. */
+  var presetsIn = Array.isArray(data) ? data
+    : (data && Array.isArray(data.presets)) ? data.presets : null;
+  var palettesIn = (data && Array.isArray(data.palettes)) ? data.palettes : null;
+  if (!presetsIn && !palettesIn) { toast('No presets or palettes found in ' + label, true); return; }
+
+  var pres = mergeByName(state.presets, presetsIn || [], {
+    clean: sanitizePreset,
+    onto: function (existing, item) {
+      existing.settings = item.settings;
+      existing.palette = item.palette;
+      existing.outlineColorTouched = item.outlineColorTouched;
+    }
+  });
+  var pals = mergeByName(state.library, palettesIn || [], {
+    clean: sanitizePalette,
+    onto: function (existing, item) { existing.colors = item.colors; }
+  });
+
+  if (!pres.added && !pres.updated && !pals.added && !pals.updated) {
+    toast('Nothing usable in ' + label, true);
+    return;
+  }
+
+  var stored = true;
+  if (pres.added || pres.updated) {
+    state.presets = pres.list;
+    stored = lsSet(LS_PRESETS, state.presets) && stored;
+    renderPresetList();
+    updatePresetNote();
+  }
+  if (pals.added || pals.updated) {
+    state.library = pals.list;
+    stored = lsSet(LS_PALETTES, state.library) && stored;
+    renderLibrary();
+  }
+
+  toast([tally('Presets', pres), tally('Palettes', pals)]
+    .filter(function (s) { return s; }).join(' · '));
+  setStatus(stored
+    ? 'Imported from ' + label
+    : 'Imported from ' + label + ' — could not be saved to this browser');
+}
+
+function loadDataFile(file) {
+  var reader = new FileReader();
+  reader.onerror = function () { toast('Could not read ' + file.name, true); };
+  reader.onload = function () {
+    var data;
+    try { data = JSON.parse(reader.result); }
+    catch (e) { toast(file.name + ' is not valid JSON.', true); return; }
+    importData(data, file.name);
+  };
+  reader.readAsText(file);
+}
+
+/* ---------------------------------------------------------------------------
+   9c. THE CARD RAILS — folding and reordering
+   ---------------------------------------------------------------------------
+   Eleven cards is more than fits a laptop rail at once, and which of them
+   matter depends entirely on what you are doing. So: clicking a card's header
+   collapses it to its title band, and dragging a header moves the card — up
+   and down its own rail, or across to the other one. Both are remembered.
+
+   Pointer events rather than HTML5 drag-and-drop, unlike the swatches above:
+   `dragstart` never fires on touch, and a card is exactly the kind of thing
+   someone rearranges on a tablet. The cost is doing the hit-testing by hand.
+   ------------------------------------------------------------------------ */
+
+function cardSections() {
+  return [].slice.call(document.querySelectorAll('.pm-section[data-card]'));
+}
+
+function cardId(section) { return section.getAttribute('data-card'); }
+function cardTitle(section) {
+  var t = section.querySelector('.pm-section-title');
+  return t ? t.textContent : 'Card';
+}
+
+/* --- Folding ------------------------------------------------------------ */
+
+function setFold(section, collapsed) {
+  section.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+  var btn = section.querySelector('.pm-fold');
+  if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function saveFolds() {
+  lsSet(LS_FOLDS, cardSections()
+    .filter(function (s) { return s.getAttribute('data-collapsed') === 'true'; })
+    .map(cardId));
+}
+
+/* --- Order -------------------------------------------------------------- */
+
+function railKey(rail) { return rail === els.railRight ? 'right' : 'left'; }
+
+function saveCardOrder() {
+  var order = { left: [], right: [] };
+  cardSections().forEach(function (s) {
+    var rail = s.closest('.pm-rail');
+    if (rail) order[railKey(rail)].push(cardId(s));
+  });
+  lsSet(LS_CARD_ORDER, order);
+}
+
+function applyCardOrder() {
+  var saved = lsGet(LS_CARD_ORDER);
+  if (!saved) return;
+  [['left', els.railLeft], ['right', els.railRight]].forEach(function (pair) {
+    var list = saved[pair[0]];
+    if (!Array.isArray(list)) return;
+    list.forEach(function (id) {
+      /* Searched across the whole page, not just this rail — that is what lets
+         a card that was dragged to the other side come back to it. */
+      var sec = document.querySelector('.pm-section[data-card="' + id + '"]');
+      if (sec) pair[1].appendChild(sec);
+    });
+  });
+  /* Anything the saved order doesn't name — a card added to the page in a
+     later version — keeps its place in the markup, which leaves it above the
+     restored ones rather than silently missing. */
+}
+
+/* Move a card one place within its rail. This is the keyboard path, and the
+   reason the drag isn't the only way: Alt+Arrow on a focused header. */
+function moveCard(section, dir) {
+  var rail = section.closest('.pm-rail');
+  if (!rail) return;
+  var sibling = dir < 0 ? section.previousElementSibling : section.nextElementSibling;
+  if (!sibling) { setStatus(cardTitle(section) + ' is already at the ' + (dir < 0 ? 'top' : 'bottom')); return; }
+  if (dir < 0) rail.insertBefore(section, sibling);
+  else rail.insertBefore(sibling, section);
+  saveCardOrder();
+  /* Moving a node in the DOM can drop focus, and a keyboard user who has just
+     pressed Alt+Down needs to still be on the card to press it again. */
+  var btn = section.querySelector('.pm-fold');
+  if (btn) btn.focus();
+  section.scrollIntoView({ block: 'nearest' });
+  setStatus('Moved ' + cardTitle(section) + ' ' + (dir < 0 ? 'up' : 'down'));
+}
+
+/* --- Dragging ----------------------------------------------------------- */
+
+var cardDrag = null;       // the drag in progress, or null
+var justDragged = false;   // suppresses the fold click that follows a drag
+
+var DRAG_SLOP = 5;         // px of movement before a press becomes a drag
+var EDGE_ZONE = 56;        // px from a rail edge where it starts auto-scrolling
+var EDGE_SPEED = 10;       // px per frame
+
+function railUnder(x, y) {
+  var el = document.elementFromPoint(x, y);
+  return el ? el.closest('.pm-rail') : null;
+}
+
+/* Where would the card land if it were dropped here? The first card whose
+   middle is below the pointer — the standard insertion rule, and the reason
+   the layout under the pointer reads as the result rather than a preview. */
+function placeCard(rail, y) {
+  var section = cardDrag.section;
+  var before = null;
+  [].slice.call(rail.children).forEach(function (child) {
+    if (before || child === section || !child.hasAttribute('data-card')) return;
+    var r = child.getBoundingClientRect();
+    if (y < r.top + r.height / 2) before = child;
+  });
+  // Already exactly there — moving the node again would only cost a reflow.
+  if (section.parentNode === rail && before === section.nextElementSibling) return;
+  rail.insertBefore(section, before);
+}
+
+function edgeScroll() {
+  if (!cardDrag || !cardDrag.active) return;
+  var rail = cardDrag.rail;
+  if (rail && cardDrag.scrollDir) {
+    var before = rail.scrollTop;
+    rail.scrollTop += cardDrag.scrollDir * EDGE_SPEED;
+    // Scrolling moves the cards under a stationary pointer, so re-place.
+    if (rail.scrollTop !== before) placeCard(rail, cardDrag.y);
+  }
+  requestAnimationFrame(edgeScroll);
+}
+
+function startCardDrag(e, section, fromGrip) {
+  if (e.button != null && e.button !== 0) return;          // left button only
+  if (e.pointerType === 'touch' && !fromGrip) return;      // touch drags by the grip
+  if (e.target.closest('button:not(.pm-fold), input, select, a')) return;
+  cardDrag = {
+    section: section,
+    id: e.pointerId,
+    x: e.clientX, y: e.clientY,
+    fromX: e.clientX, fromY: e.clientY,
+    rail: section.closest('.pm-rail'),
+    scrollDir: 0,
+    active: false
+  };
+}
+
+function moveCardDrag(e) {
+  var d = cardDrag;
+  if (!d || e.pointerId !== d.id) return;
+  d.x = e.clientX;
+  d.y = e.clientY;
+
+  if (!d.active) {
+    if (Math.abs(e.clientX - d.fromX) < DRAG_SLOP && Math.abs(e.clientY - d.fromY) < DRAG_SLOP) return;
+    d.active = true;
+    d.section.setAttribute('data-dragging', 'true');
+    document.body.classList.add('pm-card-drag');
+    requestAnimationFrame(edgeScroll);
+  }
+  e.preventDefault();
+
+  var rail = railUnder(e.clientX, e.clientY) || d.rail;
+  d.rail = rail;
+  placeCard(rail, e.clientY);
+
+  var r = rail.getBoundingClientRect();
+  d.scrollDir = e.clientY < r.top + EDGE_ZONE ? -1
+    : e.clientY > r.bottom - EDGE_ZONE ? 1 : 0;
+}
+
+function endCardDrag(e) {
+  var d = cardDrag;
+  if (!d || (e && e.pointerId !== d.id)) return;
+  cardDrag = null;
+  if (!d.active) return;
+  d.section.removeAttribute('data-dragging');
+  document.body.classList.remove('pm-card-drag');
+  saveCardOrder();
+  /* The pointerup is about to become a click on the header. That click means
+     "fold" only if the press stayed still. */
+  justDragged = true;
+  setTimeout(function () { justDragged = false; }, 0);
+}
+
+function wireCards() {
+  applyCardOrder();
+
+  var stored = lsGet(LS_FOLDS);
+  if (!Array.isArray(stored)) stored = [];
+
+  cardSections().forEach(function (section) {
+    setFold(section, stored.indexOf(cardId(section)) !== -1);
+
+    var header = section.querySelector('.cc-card-header');
+    var btn = section.querySelector('.pm-fold');
+    if (!header || !btn) return;
+
+    btn.addEventListener('click', function () {
+      if (justDragged) return;
+      setFold(section, section.getAttribute('data-collapsed') !== 'true');
+      saveFolds();
+    });
+
+    btn.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+    btn.title = 'Click to fold — drag, or Alt+↑/↓, to move this card';
+    btn.addEventListener('keydown', function (e) {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      e.preventDefault();
+      moveCard(section, e.key === 'ArrowUp' ? -1 : 1);
+    });
+
+    header.addEventListener('pointerdown', function (e) {
+      startCardDrag(e, section, !!e.target.closest('.pm-grip'));
+    });
+  });
+
+  /* The rest of the gesture is watched on the document rather than the header:
+     the pointer leaves a 25px band immediately, and a drag that stops tracking
+     the moment it does is worse than no drag at all. */
+  document.addEventListener('pointermove', moveCardDrag);
+  document.addEventListener('pointerup', endCardDrag);
+  document.addEventListener('pointercancel', endCardDrag);
+  window.addEventListener('blur', function () { endCardDrag(null); });
+}
+
 /* ---------------------------------------------------------------------------
    10. PERSISTENCE
    ---------------------------------------------------------------------------
@@ -2461,7 +2881,7 @@ function cacheEls() {
     'denoise', 'speck', 'tolerance', 'smoothStipple',
     'mergeColors', 'outline', 'outlineColor', 'outlineWidth', 'outlineMin',
     'cleanNote', 'segmentNote',
-    'setup', 'setupName', 'setupPalette', 'setupNote',
+    'setup', 'setupName', 'setupPalette', 'setupNote', 'setupFile',
     'brightness', 'contrast', 'saturation', 'gamma',
     'exportScale', 'exportFull', 'time', 'workDims', 'exportDims',
     'viewport', 'drop', 'splitHandle', 'zoomVal',
@@ -2569,14 +2989,30 @@ function wireImageInput() {
   });
 }
 
+/* An exported backup is JSON full of hex codes, so left to itself the palette
+   parser would happily scrape them into one flat palette. The format marker
+   written on export says what the file really is. */
+function asDataFile(text) {
+  var data;
+  try { data = JSON.parse(text); }
+  catch (e) { return null; }
+  if (!data || data.format !== DATA_FILE_FORMAT) return null;
+  return (Array.isArray(data.presets) || Array.isArray(data.palettes)) ? data : null;
+}
+
 function loadPaletteFile(file) {
   var reader = new FileReader();
   var isAct = /\.act$/i.test(file.name);
   reader.onload = function () {
+    if (!isAct) {
+      var backup = asDataFile(reader.result);
+      if (backup) { importData(backup, file.name); return; }
+    }
     var parsed = isAct
       ? parseActBuffer(reader.result, file.name)
       : parsePaletteText(reader.result, file.name);
     if (!parsed.colors.length) { toast('No colours found in ' + file.name, true); return; }
+
     setPalette(parsed.colors, parsed.name || file.name, null);
     toast('Imported ' + parsed.colors.length + ' colours from ' + file.name);
   };
@@ -2936,6 +3372,12 @@ function wireControls() {
   $('pm-setup-save').addEventListener('click', savePreset);
   $('pm-setup-delete').addEventListener('click', deletePreset);
   $('pm-setup-reset').addEventListener('click', resetToDefaults);
+  $('pm-setup-export').addEventListener('click', exportData);
+  $('pm-setup-import').addEventListener('click', function () { els.setupFile.click(); });
+  els.setupFile.addEventListener('change', function () {
+    if (els.setupFile.files && els.setupFile.files[0]) loadDataFile(els.setupFile.files[0]);
+    els.setupFile.value = '';   // so re-picking the same file fires again
+  });
   els.setupName.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); savePreset(); }
   });
@@ -3039,6 +3481,7 @@ function init() {
   wirePaletteUI();
   wireStage();
   wireControls();
+  wireCards();
 
   // Expose a tiny surface for automated checking — see README.
   window.PaletteMapper = {
@@ -3064,6 +3507,13 @@ function init() {
     applyPreset: applyPreset,
     savePreset: savePreset,
     resetToDefaults: resetToDefaults,
+    exportData: exportData,
+    importData: importData,
+    sanitizePreset: sanitizePreset,
+    sanitizePalette: sanitizePalette,
+    setFold: setFold,
+    moveCard: moveCard,
+    saveCardOrder: saveCardOrder,
     BUILTIN_PRESETS: BUILTIN_PRESETS
   };
 }
